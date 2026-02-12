@@ -195,6 +195,23 @@ def stop_other_instances():
 # ================ КОМАНДА /start ================
 @bot.message_handler(commands=['start'])
 def start(message):
+    # Проверяем, есть ли параметр
+    if len(message.text.split()) > 1:
+        param = message.text.split()[1]
+        if param == 'become_master':
+            # Запускаем анкету сразу
+            msg = bot.send_message(
+                message.chat.id,
+                "👷 **ЗАПОЛНЕНИЕ АНКЕТЫ МАСТЕРА**\n\n"
+                "Шаг 1 из 10\n"
+                "👇 **ВВЕДИТЕ ВАШЕ ИМЯ ИЛИ НАЗВАНИЕ БРИГАДЫ:**\n\n"
+                "Пример: Иван Петров\n"
+                "Или: Бригада «МастерОК»"
+            )
+            bot.register_next_step_handler(msg, process_master_name)
+            return
+    
+    # Обычный start
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.row('🔨 Оставить заявку', '⭐ Оставить отзыв')
     markup.row('🔍 Найти мастера', '📞 Контакты')
@@ -512,6 +529,25 @@ def help_command(message):
 @bot.message_handler(commands=['become_master'])
 @bot.message_handler(func=lambda message: message.text == '👷 Стать мастером')
 def become_master(message):
+    # Проверяем, где вызвана команда
+    if message.chat.type != 'private':
+        # Это групповой чат
+        bot.reply_to(
+            message,
+            "👷 **Заполнение анкеты происходит в личных сообщениях с ботом!**\n\n"
+            "👇 **Напишите мне в ЛС:**\n"
+            f"@{bot.get_me().username}\n\n"
+            "Или нажмите кнопку ниже 👇",
+            reply_markup=telebot.types.InlineKeyboardMarkup().add(
+                telebot.types.InlineKeyboardButton(
+                    text="👷 Заполнить анкету",
+                    url=f"https://t.me/{bot.get_me().username}?start=become_master"
+                )
+            )
+        )
+        return
+    
+    # Если это личка - начинаем анкету
     msg = bot.send_message(
         message.chat.id,
         "👷 **ЗАПОЛНЕНИЕ АНКЕТЫ МАСТЕРА**\n\n"
@@ -523,6 +559,11 @@ def become_master(message):
     bot.register_next_step_handler(msg, process_master_name)
 
 def process_master_name(message):
+    # Проверка на личные сообщения
+    if message.chat.type != 'private':
+        bot.reply_to(message, "❌ Заполняйте анкету в ЛС с ботом: @remont_vl25_chat_bot")
+        return
+    
     name = message.text
     msg = bot.send_message(
         message.chat.id,
