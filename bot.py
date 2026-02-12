@@ -88,17 +88,34 @@ def request_service(message):
         "🔨 **СОЗДАНИЕ ЗАЯВКИ**\n\n"
         "Шаг 1 из 4\n"
         "👇 **ВЫБЕРИТЕ УСЛУГУ:**\n\n"
-        "Напишите номер или название:\n"
+        "Введите цифру или название:\n"
         "1 - Сантехник\n"
         "2 - Электрик\n"
         "3 - Отделочник\n"
         "4 - Строитель\n"
-        "5 - Другое"
+        "5 - Другое\n\n"
+        "👉 Пример: 1  или  сантехник"
     )
     bot.register_next_step_handler(msg, process_service)
 
 def process_service(message):
-    service = message.text
+    service_input = message.text.strip()
+    
+    # Преобразуем цифру в название услуги
+    if service_input == "1" or "сантехник" in service_input.lower():
+        service = "Сантехник"
+    elif service_input == "2" or "электрик" in service_input.lower():
+        service = "Электрик"  
+    elif service_input == "3" or "отделочник" in service_input.lower():
+        service = "Отделочник"
+    elif service_input == "4" or "строитель" in service_input.lower():
+        service = "Строитель"
+    elif service_input == "5" or "другое" in service_input.lower():
+        service = "Другое"
+    else:
+        # Если пользователь ввел что-то своё
+        service = service_input.capitalize()
+    
     msg = bot.send_message(
         message.chat.id,
         "📝 **Шаг 2 из 4**\n\n"
@@ -106,10 +123,10 @@ def process_service(message):
         "Например:\n"
         "• Заменить смеситель на кухне\n"
         "• Перенести 3 розетки в зале\n"
-        "• Поклеить обои в спальне 15м²",
-        parse_mode='Markdown'
+        "• Поклеить обои в спальне 15м²"
     )
     bot.register_next_step_handler(msg, process_description, service)
+  
 def process_description(message, service):
     description = message.text
     msg = bot.send_message(
