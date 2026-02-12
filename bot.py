@@ -145,7 +145,73 @@ def delete_group_commands(message):
             bot.delete_message(message.chat.id, message.message_id)
         except:
             pass
+@bot.message_handler(commands=['test_sheet'])
+def test_sheet(message):
+    # Проверка прав (только для админа)
+    if message.from_user.id != ADMIN_ID:
+        bot.reply_to(message, "❌ У вас нет прав для этой команды.")
+        return
 
+    result_text = "🔍 **ДИАГНОСТИКА GOOGLE SHEETS**\n\n"
+    
+    # 1. Проверка переменных окружения
+    creds_json = os.environ.get('GOOGLE_CREDENTIALS')
+    sheet_id = os.environ.get('GOOGLE_SHEET_ID')
+    
+    result_text += f"**GOOGLE_CREDENTIALS:** {'✅ Есть' if creds_json else '❌ НЕТ'}\n"
+    result_text += f"**GOOGLE_SHEET_ID:** {'✅ Есть' if sheet_id else '❌ НЕТ'}\n\n"
+    
+    if not creds_json or not sheet_id:
+        result_text += "❌ **Ошибка:** переменные окружения не заданы.\n"
+        result_text += "Добавьте их в Railway: Variables → New Variable"
+        bot.reply_to(message, result_text)
+        return
+    
+    # 2. Проверка подключения
+    try:
+        sheet = get_google_sheet()
+    except Exception as e:
+        result_text += f"❌ **Ошибка при вызове get_google_sheet():**\n`{type(e).__name__}: {e}`"
+        bot.reply_to(message, result_text)
+        return
+    
+    if not sheet:
+        result_text += "❌ **get_google_sheet() вернул None**\n"
+        result_text += "Смотрите логи Railway для подробностей."
+        bot.reply_to(message, result_text)
+        return
+    
+    # 3. Успешное подключение
+    result_text += f"✅ **Подключение успешно!**\n"
+    result_text += f"📄 **Лист:** {sheet.title}\n"
+    result_text += f"📊 **Всего строк:** {len(sheet.get_all_values())}\n\n"
+    
+    # 4. Тестовая запись
+    try:
+        test_row = [
+            "TEST",                             # A: ID
+            datetime.now().strftime("%d.%m.%Y"), # B: Дата
+            "Тестовый мастер",                  # C: Имя
+            "Тест",                            # D: Специализация
+            "+7 999 999-99-99",                # E: Телефон
+            "Патрокл",                         # F: Районы
+            "1000₽",                           # G: Цена от
+            "5000₽",                           # H: Цена до
+            "5 лет",                           # I: Опыт
+            "Нет",                             # J: Портфолио
+            "Есть",                            # K: Документы
+            "5.0",                             # L: Рейтинг
+            "1",                               # M: Отзывов
+            "Тест",                            # N: Статус
+            "12345"                            # O: Telegram ID
+        ]
+        sheet.append_row(test_row)
+        result_text += "✅ **Тестовая запись успешно добавлена!**\n"
+        result_text += "Посмотрите таблицу — должна появиться новая строка."
+    except Exception as e:
+        result_text += f"❌ **Ошибка при записи:**\n`{type(e).__name__}: {e}`"
+    
+    bot.reply_to(message, result_text)
 # ================ КОМАНДА /start ================
 @bot.message_handler(commands=['start'])
 def start(message):
