@@ -761,4 +761,52 @@ def reject_master(message):
         bot.reply_to(message, f"❌ Мастер {application[3]} отклонён. Причина: {reason}")
         
     except ValueError:
-        bot.reply_to(message, "
+        bot.reply_to(message, "❌ ID анкеты должен быть числом.")
+    except Exception as e:
+        bot.reply_to(message, f"❌ Ошибка: {e}")
+
+# ================ ОБРАБОТКА ТЕКСТОВЫХ СООБЩЕНИЙ ================
+@bot.message_handler(func=lambda message: True)
+def echo_all(message):
+    if message.text.startswith('/'):
+        bot.send_message(
+            message.chat.id,
+            "❌ Неизвестная команда. Используйте /help для списка команд."
+        )
+    else:
+        bot.send_message(
+            message.chat.id,
+            "👋 Используйте команды из меню или нажмите /help"
+        )
+
+# ================ ЗАПУСК БОТА ================
+if __name__ == '__main__':
+    print("=" * 50)
+    print("✅ Бот запускается...")
+    print(f"🤖 Токен: {TOKEN[:10]}... (скрыт)")
+    print(f"💬 Чат: {CHAT_ID}")
+    print(f"📢 Канал: {CHANNEL_LINK}")
+    print(f"👑 Админ ID: {ADMIN_ID}")
+    print("=" * 50)
+    
+    # Сбрасываем вебхук и останавливаем другие экземпляры
+    reset_webhook()
+    stop_other_instances()
+    time.sleep(2)
+    
+    print("⏳ Бот работает 24/7...")
+    print("=" * 50)
+    
+    # Бесконечный цикл с обработкой ошибок
+    while True:
+        try:
+            bot.polling(none_stop=True, interval=0, timeout=20)
+        except Exception as e:
+            print(f"❌ Ошибка: {e}")
+            if "409" in str(e):
+                print("🔄 Обнаружен конфликт! Принудительный сброс...")
+                reset_webhook()
+                stop_other_instances()
+            print("🔄 Перезапуск через 5 секунд...")
+            time.sleep(5)
+            continue
