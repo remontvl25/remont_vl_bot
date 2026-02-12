@@ -15,39 +15,94 @@ if not TOKEN:
     print("❌ ОШИБКА: Токен не найден в переменных окружения!")
     exit(1)
 
-CHAT_ID = "@remontvl25chat"  # Чат для заявок
-CHANNEL_LINK = "@remont_vl25"  # Канал с мастерами
+CHAT_ID = os.environ.get('CHAT_ID', "@remontvl25chat")  # Чат для заявок
+CHANNEL_LINK = os.environ.get('CHANNEL_LINK', "@remont_vl25")  # Канал с мастерами
 
-# ID администратора для уведомлений - ЗАМЕНИТЕ НА ВАШ!
-ADMIN_ID = 8111497942  # ⚠️ ВАЖНО: ВСТАВЬТЕ СВОЙ ID!
+# ID администратора для уведомлений - из переменных окружения
+try:
+    ADMIN_ID = int(os.environ.get('ADMIN_ID', '0'))
+    if ADMIN_ID == 0:
+        print("⚠️ ВНИМАНИЕ: ADMIN_ID не задан в переменных окружения!")
+except:
+    ADMIN_ID = 0
+    print("⚠️ ВНИМАНИЕ: ADMIN_ID не задан в переменных окружения!")
 
 # Создаем бота
 bot = telebot.TeleBot(TOKEN)
 
-# ================ GOOGLE SHEETS ИНТЕГРАЦИЯ ================
+# ================ GOOGLE SHEETS ИНТЕГРАЦИЯ С ОТЛАДКОЙ ================
 def get_google_sheet():
-    """Подключение к Google Sheets"""
+    """Подключение к Google Sheets с подробной отладкой"""
     try:
+        print("\n🔍 Начинаем подключение к Google Sheets...")
+        
         google_creds_json = os.environ.get('GOOGLE_CREDENTIALS')
         if not google_creds_json:
-            print("⚠️ GOOGLE_CREDENTIALS не найдены в переменных окружения")
+            print("❌ GOOGLE_CREDENTIALS не найдены в переменных окружения")
             return None
         
-        creds_dict = json.loads(google_creds_json)
+        print(f"✅ GOOGLE_CREDENTIALS найдены, длина: {len(google_creds_json)} символов")
+        print(f"📋 Первые 50 символов: {google_creds_json[:50]}...")
+        
+        # Пробуем распарсить JSON
+        try:
+            creds_dict = json.loads(google_creds_json)
+            print(f"✅ JSON распарсен успешно")
+            print(f"📧 client_email: {creds_dict.get('client_email', 'НЕТ!')}")
+            print(f"🏢 project_id: {creds_dict.get('project_id', 'НЕТ!')}")
+        except json.JSONDecodeError as e:
+            print(f"❌ Ошибка парсинга JSON: {e}")
+            print(f"   Проблемный участок: {google_creds_json[e.pos-50:e.pos+50] if e.pos > 50 else google_creds_json[:100]}")
+            return None
+        
+        # Авторизация
         scope = ['https://spreadsheets.google.com/feeds',
                  'https://www.googleapis.com/auth/drive']
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-        client = gspread.authorize(creds)
+        try:
+            creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+            client = gspread.authorize(creds)
+            print(f"✅ Авторизация в Google API успешна")
+        except Exception as e:
+            print(f"❌ Ошибка авторизации: {e}")
+            return None
         
         sheet_id = os.environ.get('GOOGLE_SHEET_ID')
         if not sheet_id:
-            print("⚠️ GOOGLE_SHEET_ID не найден в переменных окружения")
+            print("❌ GOOGLE_SHEET_ID не найден в переменных окружения")
             return None
         
-        sheet = client.open_by_key(sheet_id).worksheet('Мастера')
-        return sheet
+        print(f"✅ GOOGLE_SHEET_ID: {sheet_id}")
+        
+        # Пробуем открыть таблицу
+        try:
+            # Сначала пробуем открыть по ID
+            spreadsheet = client.open_by_key(sheet_id)
+            print(f"✅ Таблица найдена: {spreadsheet.title}")
+            
+            # Пробуем открыть лист 'Мастера'
+            try:
+                sheet = spreadsheet.worksheet('Мастера')
+                print(f"✅ Лист 'Мастера' найден")
+                return sheet
+            except gspread.WorksheetNotFound:
+                print(f"⚠️ Лист 'Мастера' не найден, используем первый лист")
+                sheet = spreadsheet.sheet1
+                print(f"✅ Используем лист: {sheet.title}")
+                return sheet
+                
+        except gspread.exceptions.APIError as e:
+            print(f"❌ Google Sheets API Error: {e}")
+            if "403" in str(e):
+                print("   ⚠️ Ошибка доступа! Проверьте права для сервисного аккаунта")
+                print(f"   Добавьте в редакторы таблицы email: {creds_dict.get('client_email', 'НЕИЗВЕСТНО')}")
+            if "404" in str(e):
+                print("   ⚠️ Таблица не найдена! Проверьте GOOGLE_SHEET_ID")
+            return None
+            
     except Exception as e:
-        print(f"❌ Ошибка подключения к Google Sheets: {e}")
+        print(f"❌ Общая ошибка подключения к Google Sheets: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 def add_master_to_google_sheet(master_data):
@@ -55,6 +110,7 @@ def add_master_to_google_sheet(master_data):
     try:
         sheet = get_google_sheet()
         if not sheet:
+            print("❌ Не удалось получить доступ к Google Sheets")
             return False
         
         row = [
@@ -172,6 +228,25 @@ try:
 except:
     pass
 
+# ================ ПРОВЕРКА НА ЛИЧНЫЕ СООБЩЕНИЯ ================
+def only_private(message):
+    """Проверка, что команда вызвана в личных сообщениях"""
+    if message.chat.type != 'private':
+        bot.reply_to(
+            message,
+            "❌ **Эта команда работает только в личных сообщениях с ботом.**\n\n"
+            f"👉 Напишите мне в ЛС: @{bot.get_me().username}\n"
+            f"🔗 Или нажмите кнопку ниже:",
+            reply_markup=telebot.types.InlineKeyboardMarkup().add(
+                telebot.types.InlineKeyboardButton(
+                    text="🤖 Перейти в бота",
+                    url=f"https://t.me/{bot.get_me().username}"
+                )
+            )
+        )
+        return False
+    return True
+
 # ================ ФУНКЦИЯ СБРОСА ВЕБХУКА ================
 def reset_webhook():
     try:
@@ -192,26 +267,75 @@ def stop_other_instances():
     except Exception as e:
         print(f"⚠️ Не удалось остановить другие экземпляры: {e}")
 
+# ================ ТЕСТ GOOGLE SHEETS ================
+@bot.message_handler(commands=['test_google'])
+def test_google(message):
+    if message.from_user.id != ADMIN_ID:
+        bot.reply_to(message, "❌ У вас нет прав для этой команды.")
+        return
+    
+    try:
+        result = "🔍 **ПРОВЕРКА GOOGLE SHEETS:**\n\n"
+        
+        # Проверяем переменные
+        sheet_id = os.environ.get('GOOGLE_SHEET_ID')
+        creds_json = os.environ.get('GOOGLE_CREDENTIALS')
+        
+        result += f"**Переменные окружения:**\n"
+        result += f"GOOGLE_SHEET_ID: {'✅ Есть' if sheet_id else '❌ Нет'}\n"
+        result += f"GOOGLE_CREDENTIALS: {'✅ Есть' if creds_json else '❌ Нет'}\n\n"
+        
+        if sheet_id:
+            result += f"ID таблицы: `{sheet_id}`\n"
+        if creds_json:
+            result += f"Длина JSON: {len(creds_json)} символов\n"
+            result += f"Первые 50 символов: `{creds_json[:50]}...`\n\n"
+        
+        # Пробуем подключиться
+        result += "**Попытка подключения:**\n"
+        sheet = get_google_sheet()
+        
+        if sheet:
+            result += "✅ **ПОДКЛЮЧЕНИЕ УСПЕШНО!**\n"
+            result += f"📊 Таблица: {sheet.spreadsheet.title}\n"
+            result += f"📄 Лист: {sheet.title}\n"
+            result += f"📏 Строк: {len(sheet.get_all_values())}\n"
+        else:
+            result += "❌ **ОШИБКА ПОДКЛЮЧЕНИЯ**\n"
+            result += "Проверьте логи Railway для деталей."
+        
+        bot.reply_to(message, result, parse_mode='Markdown')
+        
+    except Exception as e:
+        bot.reply_to(message, f"❌ Ошибка: {e}")
+
 # ================ КОМАНДА /start ================
 @bot.message_handler(commands=['start'])
 def start(message):
-    # Проверяем, есть ли параметр
-    if len(message.text.split()) > 1:
-        param = message.text.split()[1]
-        if param == 'become_master':
-            # Запускаем анкету сразу
-            msg = bot.send_message(
-                message.chat.id,
-                "👷 **ЗАПОЛНЕНИЕ АНКЕТЫ МАСТЕРА**\n\n"
-                "Шаг 1 из 10\n"
-                "👇 **ВВЕДИТЕ ВАШЕ ИМЯ ИЛИ НАЗВАНИЕ БРИГАДЫ:**\n\n"
-                "Пример: Иван Петров\n"
-                "Или: Бригада «МастерОК»"
+    if message.chat.type != 'private':
+        # В групповом чате - только ссылка на ЛС
+        bot.reply_to(
+            message,
+            "👋 **Добро пожаловать в бот заявок на ремонт!**\n\n"
+            "📌 **В этом чате я только публикую заявки и отзывы.**\n\n"
+            "👇 **Вся работа со мной — в личных сообщениях:**\n"
+            f"👉 @{bot.get_me().username}\n\n"
+            "**Там вы можете:**\n"
+            "✅ Оставить заявку на ремонт\n"
+            "✅ Найти проверенного мастера\n"
+            "✅ Стать мастером и добавить анкету\n"
+            "✅ Оставить отзыв о работе\n"
+            "✅ Проверить статус анкеты",
+            reply_markup=telebot.types.InlineKeyboardMarkup().add(
+                telebot.types.InlineKeyboardButton(
+                    text="🤖 Перейти в бота",
+                    url=f"https://t.me/{bot.get_me().username}"
+                )
             )
-            bot.register_next_step_handler(msg, process_master_name)
-            return
+        )
+        return
     
-    # Обычный start
+    # В ЛС - полное меню
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.row('🔨 Оставить заявку', '⭐ Оставить отзыв')
     markup.row('🔍 Найти мастера', '📞 Контакты')
@@ -219,18 +343,21 @@ def start(message):
     
     bot.send_message(
         message.chat.id,
-        "👋 Добро пожаловать в бот заявок на ремонт!\n\n"
-        "🔹 Хотите найти мастера? Нажмите «Оставить заявку»\n"
-        "🔹 Хотите поблагодарить мастера? Нажмите «Оставить отзыв»\n"
-        "🔹 Хотите добавить свою анкету? Нажмите «Стать мастером»\n\n"
-        f"💬 Чат-заявок: {CHAT_ID}\n"
-        f"📢 Канал с мастерами: {CHANNEL_LINK}",
+        "👋 **Добро пожаловать в бот заявок на ремонт!**\n\n"
+        "🔹 **Хотите найти мастера?** Нажмите «Оставить заявку»\n"
+        "🔹 **Хотите поблагодарить мастера?** Нажмите «Оставить отзыв»\n"
+        "🔹 **Хотите добавить свою анкету?** Нажмите «Стать мастером»\n\n"
+        f"💬 **Чат-заявок:** {CHAT_ID}\n"
+        f"📢 **Канал с мастерами:** {CHANNEL_LINK}",
         reply_markup=markup
     )
 
 # ================ КНОПКА "КАНАЛ С МАСТЕРАМИ" ================
 @bot.message_handler(func=lambda message: message.text == '📢 Канал с мастерами')
 def channel_link(message):
+    if not only_private(message):
+        return
+    
     markup = telebot.types.InlineKeyboardMarkup()
     button = telebot.types.InlineKeyboardButton(
         text="📢 Перейти в канал", 
@@ -240,8 +367,8 @@ def channel_link(message):
     
     bot.send_message(
         message.chat.id,
-        f"📢 Наш канал с проверенными мастерами: {CHANNEL_LINK}\n\n"
-        "В канале вы найдете:\n"
+        f"📢 **Наш канал с проверенными мастерами:** {CHANNEL_LINK}\n\n"
+        "**В канале вы найдете:**\n"
         "✅ Карточки мастеров с отзывами\n"
         "✅ Реальные цены на ремонт\n"
         "✅ Фото работ до/после\n"
@@ -249,10 +376,13 @@ def channel_link(message):
         reply_markup=markup
     )
 
-# ================ ЗАЯВКА ================
+# ================ ЗАЯВКА (ТОЛЬКО В ЛС) ================
 @bot.message_handler(commands=['request'])
 @bot.message_handler(func=lambda message: message.text == '🔨 Оставить заявку')
 def request_service(message):
+    if not only_private(message):
+        return
+    
     msg = bot.send_message(
         message.chat.id,
         "🔨 **СОЗДАНИЕ ЗАЯВКИ**\n\n"
@@ -264,11 +394,14 @@ def request_service(message):
         "3 - Отделочник\n"
         "4 - Строитель\n"
         "5 - Другое\n\n"
-        "👉 Пример: 1  или  сантехник"
+        "👉 Пример: `1` или `сантехник`"
     )
     bot.register_next_step_handler(msg, process_service)
 
 def process_service(message):
+    if message.chat.type != 'private':
+        return
+    
     service_input = message.text.strip().lower()
     
     if service_input == "1" or "сантехник" in service_input:
@@ -296,6 +429,9 @@ def process_service(message):
     bot.register_next_step_handler(msg, process_description, service)
 
 def process_description(message, service):
+    if message.chat.type != 'private':
+        return
+    
     description = message.text
     msg = bot.send_message(
         message.chat.id,
@@ -306,6 +442,9 @@ def process_description(message, service):
     bot.register_next_step_handler(msg, process_district, service, description)
 
 def process_district(message, service, description):
+    if message.chat.type != 'private':
+        return
+    
     district = message.text
     msg = bot.send_message(
         message.chat.id,
@@ -320,6 +459,9 @@ def process_district(message, service, description):
     bot.register_next_step_handler(msg, process_date, service, description, district)
 
 def process_date(message, service, description, district):
+    if message.chat.type != 'private':
+        return
+    
     date = message.text
     msg = bot.send_message(
         message.chat.id,
@@ -330,19 +472,24 @@ def process_date(message, service, description, district):
     bot.register_next_step_handler(msg, process_budget, service, description, district, date)
 
 def process_budget(message, service, description, district, date):
+    if message.chat.type != 'private':
+        return
+    
     budget = message.text
     
+    # Сохраняем в БД
     cursor.execute('''INSERT INTO requests 
                     (user_id, username, service, description, district, date, budget, status, created_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                     (message.from_user.id,
-                     message.from_user.username or message.from_user.first_name,
+                     message.from_user.username or "user",
                      service, description, district, date, budget,
                      'активна',
                      datetime.now().strftime("%d.%m.%Y %H:%M")))
     conn.commit()
     
-    username = message.from_user.username or message.from_user.first_name
+    # Отправляем заявку в чат (АНОНИМНО - только username)
+    username = message.from_user.username or "Клиент"
     request_text = f"""
 🆕 **НОВАЯ ЗАЯВКА!**
 
@@ -362,15 +509,18 @@ def process_budget(message, service, description, district, date):
     bot.send_message(
         message.chat.id,
         f"✅ **ЗАЯВКА ОПУБЛИКОВАНА!**\n\n"
-        f"💬 Чат с мастерами: {CHAT_ID}\n"
+        f"💬 **Чат с мастерами:** {CHAT_ID}\n"
         f"⏱ Ожидайте откликов в течение 5-10 минут.\n\n"
         f"📌 Если никто не ответил за 30 минут — создайте новую заявку."
     )
 
-# ================ ОТЗЫВ ================
+# ================ ОТЗЫВ (ТОЛЬКО В ЛС) ================
 @bot.message_handler(commands=['review'])
 @bot.message_handler(func=lambda message: message.text == '⭐ Оставить отзыв')
 def add_review(message):
+    if not only_private(message):
+        return
+    
     msg = bot.send_message(
         message.chat.id,
         "⭐ **ОСТАВИТЬ ОТЗЫВ**\n\n"
@@ -379,6 +529,9 @@ def add_review(message):
     bot.register_next_step_handler(msg, process_review_master)
 
 def process_review_master(message):
+    if message.chat.type != 'private':
+        return
+    
     master = message.text
     msg = bot.send_message(
         message.chat.id,
@@ -388,6 +541,9 @@ def process_review_master(message):
     bot.register_next_step_handler(msg, process_review_text, master)
 
 def process_review_text(message, master):
+    if message.chat.type != 'private':
+        return
+    
     review_text = message.text
     
     markup = telebot.types.InlineKeyboardMarkup(row_width=5)
@@ -414,6 +570,7 @@ def rating_callback(call):
     rating = data[1]
     master = '_'.join(data[2:])
     
+    # Сохраняем отзыв
     cursor.execute('''INSERT INTO reviews
                     (master_name, user_name, rating, created_at)
                     VALUES (?, ?, ?, ?)''',
@@ -433,11 +590,25 @@ def rating_callback(call):
         call.message.chat.id,
         call.message.message_id
     )
+    
+    # Публикуем отзыв в чате
+    review_public = f"""
+⭐ **НОВЫЙ ОТЗЫВ!**
 
-# ================ ПОИСК МАСТЕРОВ ================
+👤 **Мастер:** {master.replace('_', ' ')}
+⭐ **Оценка:** {'⭐' * int(rating)}
+📝 **Отзыв:** {review_text if 'review_text' in locals() else ''}
+    """
+    bot.send_message(CHAT_ID, review_public)
+
+# ================ ПОИСК МАСТЕРОВ (ТОЛЬКО В ЛС) ================
 @bot.message_handler(commands=['search'])
 @bot.message_handler(func=lambda message: message.text == '🔍 Найти мастера')
 def search_master(message):
+    if not only_private(message):
+        return
+    
+    # Получаем статистику из БД
     cursor.execute("SELECT service, COUNT(*), AVG(rating) FROM masters GROUP BY service")
     masters_stats = cursor.fetchall()
     
@@ -461,7 +632,11 @@ def search_master(message):
         text="📢 Подписаться на канал", 
         url="https://t.me/remont_vl25"
     )
-    markup.add(btn_channel)
+    btn_chat = telebot.types.InlineKeyboardButton(
+        text="💬 Перейти в чат",
+        url="https://t.me/remontvl25chat"
+    )
+    markup.add(btn_channel, btn_chat)
     
     bot.send_message(
         message.chat.id,
@@ -469,10 +644,13 @@ def search_master(message):
         reply_markup=markup
     )
 
-# ================ КОНТАКТЫ ================
+# ================ КОНТАКТЫ (ТОЛЬКО В ЛС) ================
 @bot.message_handler(commands=['contacts'])
 @bot.message_handler(func=lambda message: message.text == '📞 Контакты')
 def contacts(message):
+    if not only_private(message):
+        return
+    
     markup = telebot.types.InlineKeyboardMarkup(row_width=1)
     
     btn_channel = telebot.types.InlineKeyboardButton(
@@ -493,17 +671,20 @@ def contacts(message):
     bot.send_message(
         message.chat.id,
         f"📞 **КОНТАКТЫ**\n\n"
-        f"📢 Канал с мастерами: {CHANNEL_LINK}\n"
-        f"💬 Чат-заявок: {CHAT_ID}\n"
-        f"🤖 Этот бот: @remont_vl25_chat_bot\n"
-        f"👨‍💻 Администратор: @remont_vl25\n\n"
+        f"📢 **Канал с мастерами:** {CHANNEL_LINK}\n"
+        f"💬 **Чат-заявок:** {CHAT_ID}\n"
+        f"🤖 **Этот бот:** @{bot.get_me().username}\n"
+        f"👨‍💻 **Администратор:** @remont_vl25\n\n"
         f"📌 По вопросам сотрудничества и рекламы — пишите админу!",
         reply_markup=markup
     )
 
-# ================ ПОМОЩЬ ================
+# ================ ПОМОЩЬ (ТОЛЬКО В ЛС) ================
 @bot.message_handler(commands=['help'])
 def help_command(message):
+    if not only_private(message):
+        return
+    
     bot.send_message(
         message.chat.id,
         "❓ **ПОМОЩЬ**\n\n"
@@ -522,32 +703,16 @@ def help_command(message):
         "3. Опишите задачу\n"
         "4. Укажите район и дату\n"
         "5. Введите бюджет\n"
-        "6. Ждите откликов в чате"
+        "6. Ждите откликов в чате @remontvl25chat"
     )
 
-# ================ АНКЕТА МАСТЕРА ================
+# ================ АНКЕТА МАСТЕРА (ТОЛЬКО В ЛС) ================
 @bot.message_handler(commands=['become_master'])
 @bot.message_handler(func=lambda message: message.text == '👷 Стать мастером')
 def become_master(message):
-    # Проверяем, где вызвана команда
-    if message.chat.type != 'private':
-        # Это групповой чат
-        bot.reply_to(
-            message,
-            "👷 **Заполнение анкеты происходит в личных сообщениях с ботом!**\n\n"
-            "👇 **Напишите мне в ЛС:**\n"
-            f"@{bot.get_me().username}\n\n"
-            "Или нажмите кнопку ниже 👇",
-            reply_markup=telebot.types.InlineKeyboardMarkup().add(
-                telebot.types.InlineKeyboardButton(
-                    text="👷 Заполнить анкету",
-                    url=f"https://t.me/{bot.get_me().username}?start=become_master"
-                )
-            )
-        )
+    if not only_private(message):
         return
     
-    # Если это личка - начинаем анкету
     msg = bot.send_message(
         message.chat.id,
         "👷 **ЗАПОЛНЕНИЕ АНКЕТЫ МАСТЕРА**\n\n"
@@ -559,9 +724,7 @@ def become_master(message):
     bot.register_next_step_handler(msg, process_master_name)
 
 def process_master_name(message):
-    # Проверка на личные сообщения
     if message.chat.type != 'private':
-        bot.reply_to(message, "❌ Заполняйте анкету в ЛС с ботом: @remont_vl25_chat_bot")
         return
     
     name = message.text
@@ -581,6 +744,9 @@ def process_master_name(message):
     bot.register_next_step_handler(msg, process_master_service, name)
 
 def process_master_service(message, name):
+    if message.chat.type != 'private':
+        return
+    
     service_input = message.text.strip().lower()
     
     if service_input == "1" or "сантехник" in service_input:
@@ -608,6 +774,9 @@ def process_master_service(message, name):
     bot.register_next_step_handler(msg, process_master_phone, name, service)
 
 def process_master_phone(message, name, service):
+    if message.chat.type != 'private':
+        return
+    
     phone = message.text
     msg = bot.send_message(
         message.chat.id,
@@ -619,6 +788,9 @@ def process_master_phone(message, name, service):
     bot.register_next_step_handler(msg, process_master_districts, name, service, phone)
 
 def process_master_districts(message, name, service, phone):
+    if message.chat.type != 'private':
+        return
+    
     districts = message.text
     msg = bot.send_message(
         message.chat.id,
@@ -629,6 +801,9 @@ def process_master_districts(message, name, service, phone):
     bot.register_next_step_handler(msg, process_master_price_min, name, service, phone, districts)
 
 def process_master_price_min(message, name, service, phone, districts):
+    if message.chat.type != 'private':
+        return
+    
     price_min = message.text
     msg = bot.send_message(
         message.chat.id,
@@ -639,6 +814,9 @@ def process_master_price_min(message, name, service, phone, districts):
     bot.register_next_step_handler(msg, process_master_price_max, name, service, phone, districts, price_min)
 
 def process_master_price_max(message, name, service, phone, districts, price_min):
+    if message.chat.type != 'private':
+        return
+    
     price_max = message.text
     msg = bot.send_message(
         message.chat.id,
@@ -649,6 +827,9 @@ def process_master_price_max(message, name, service, phone, districts, price_min
     bot.register_next_step_handler(msg, process_master_experience, name, service, phone, districts, price_min, price_max)
 
 def process_master_experience(message, name, service, phone, districts, price_min, price_max):
+    if message.chat.type != 'private':
+        return
+    
     experience = message.text
     msg = bot.send_message(
         message.chat.id,
@@ -663,6 +844,9 @@ def process_master_experience(message, name, service, phone, districts, price_mi
     bot.register_next_step_handler(msg, process_master_portfolio, name, service, phone, districts, price_min, price_max, experience)
 
 def process_master_portfolio(message, name, service, phone, districts, price_min, price_max, experience):
+    if message.chat.type != 'private':
+        return
+    
     portfolio = message.text
     if portfolio.lower() == "пропустить":
         portfolio = "Не указано"
@@ -680,8 +864,12 @@ def process_master_portfolio(message, name, service, phone, districts, price_min
     bot.register_next_step_handler(msg, process_master_documents, name, service, phone, districts, price_min, price_max, experience, portfolio)
 
 def process_master_documents(message, name, service, phone, districts, price_min, price_max, experience, portfolio):
+    if message.chat.type != 'private':
+        return
+    
     documents = message.text
     
+    # Сохраняем в базу данных
     cursor.execute('''INSERT INTO master_applications
                     (user_id, username, name, service, phone, districts, 
                      price_min, price_max, experience, portfolio, documents, status, created_at)
@@ -696,7 +884,7 @@ def process_master_documents(message, name, service, phone, districts, price_min
     
     application_id = cursor.lastrowid
     
-    # ========== ОТПРАВКА В GOOGLE ТАБЛИЦУ ==========
+    # Отправка в Google Таблицу
     master_data = {
         'id': application_id,
         'date': datetime.now().strftime("%d.%m.%Y"),
@@ -715,9 +903,13 @@ def process_master_documents(message, name, service, phone, districts, price_min
         'telegram_id': message.from_user.id
     }
     
-    add_master_to_google_sheet(master_data)
-    # ==============================================
+    # Отправляем в Google Sheets (не критично если не работает)
+    try:
+        add_master_to_google_sheet(master_data)
+    except Exception as e:
+        print(f"⚠️ Ошибка отправки в Google Sheets: {e}")
     
+    # Отправляем администратору уведомление
     admin_message = f"""
 🆕 **НОВАЯ АНКЕТА МАСТЕРА!** (ID: {application_id})
 
@@ -734,17 +926,19 @@ def process_master_documents(message, name, service, phone, districts, price_min
 🆔 **ID:** {message.from_user.id}
 
 **Статус:** ⏳ На проверке
-📊 **Google Таблица:** обновлена
+📊 **Google Таблица:** {'✅ отправлено' if add_master_to_google_sheet else '⚠️ ошибка'}
 
 ✅ Одобрить: /approve {application_id}
 ❌ Отклонить: /reject {application_id} [причина]
     """
     
     try:
-        bot.send_message(ADMIN_ID, admin_message)
+        if ADMIN_ID != 0:
+            bot.send_message(ADMIN_ID, admin_message)
     except Exception as e:
         print(f"⚠️ Не удалось отправить уведомление админу: {e}")
     
+    # Отправляем мастеру подтверждение
     bot.send_message(
         message.chat.id,
         "✅ **ВАША АНКЕТА ОТПРАВЛЕНА!**\n\n"
@@ -757,9 +951,12 @@ def process_master_documents(message, name, service, phone, districts, price_min
         "Статус проверки можно узнать по команде /my_status"
     )
 
-# ================ ПРОВЕРКА СТАТУСА АНКЕТЫ ================
+# ================ ПРОВЕРКА СТАТУСА АНКЕТЫ (ТОЛЬКО В ЛС) ================
 @bot.message_handler(commands=['my_status'])
 def my_status(message):
+    if not only_private(message):
+        return
+    
     cursor.execute('''SELECT status, created_at FROM master_applications 
                     WHERE user_id = ? ORDER BY id DESC LIMIT 1''',
                     (message.from_user.id,))
@@ -821,9 +1018,12 @@ def approve_master(message):
         conn.commit()
         
         # Обновление статуса в Google Таблице
-        update_master_status_in_google_sheet(application[1], 'Одобрена')
+        try:
+            update_master_status_in_google_sheet(application[1], 'Одобрена')
+        except Exception as e:
+            print(f"⚠️ Ошибка обновления Google Sheets: {e}")
         
-        # Уведомление мастеру
+        # Отправляем уведомление мастеру
         try:
             bot.send_message(
                 application[1],
@@ -875,9 +1075,12 @@ def reject_master(message):
         conn.commit()
         
         # Обновление статуса в Google Таблице
-        update_master_status_in_google_sheet(application[1], 'Отклонена')
+        try:
+            update_master_status_in_google_sheet(application[1], 'Отклонена')
+        except Exception as e:
+            print(f"⚠️ Ошибка обновления Google Sheets: {e}")
         
-        # Уведомление мастеру
+        # Отправляем уведомление мастеру
         try:
             bot.send_message(
                 application[1],
@@ -897,48 +1100,50 @@ def reject_master(message):
     except Exception as e:
         bot.reply_to(message, f"❌ Ошибка: {e}")
 
-# ================ ТЕСТОВАЯ КОМАНДА ДЛЯ ПРОВЕРКИ GOOGLE SHEETS ================
-@bot.message_handler(commands=['test_sheet'])
-def test_sheet(message):
-    if message.from_user.id == ADMIN_ID:
-        sheet = get_google_sheet()
-        if sheet:
-            bot.reply_to(message, "✅ Подключение к Google Sheets работает! Таблица найдена.")
-        else:
-            bot.reply_to(message, "❌ Ошибка подключения к Google Sheets. Проверьте переменные GOOGLE_CREDENTIALS и GOOGLE_SHEET_ID")
-
 # ================ ОБРАБОТКА ТЕКСТОВЫХ СООБЩЕНИЙ ================
 @bot.message_handler(func=lambda message: True)
 def echo_all(message):
-    if message.text.startswith('/'):
-        bot.send_message(
-            message.chat.id,
-            "❌ Неизвестная команда. Используйте /help для списка команд."
-        )
-    else:
-        bot.send_message(
-            message.chat.id,
-            "👋 Используйте команды из меню или нажмите /help"
-        )
+    if message.chat.type == 'private':
+        if message.text.startswith('/'):
+            bot.send_message(
+                message.chat.id,
+                "❌ Неизвестная команда. Используйте /help для списка команд."
+            )
+        else:
+            bot.send_message(
+                message.chat.id,
+                "👋 Используйте команды из меню или нажмите /help"
+            )
 
 # ================ ЗАПУСК БОТА ================
 if __name__ == '__main__':
     print("=" * 60)
     print("✅ Бот запускается...")
+    print(f"🤖 Username: @{bot.get_me().username}")
     print(f"🤖 Токен: {TOKEN[:10]}... (скрыт)")
     print(f"💬 Чат: {CHAT_ID}")
     print(f"📢 Канал: {CHANNEL_LINK}")
     print(f"👑 Админ ID: {ADMIN_ID}")
-    print(f"📊 Google Sheets: {'Подключен' if get_google_sheet() else 'Не подключен'}")
     print("=" * 60)
     
+    # Проверяем подключение к Google Sheets
+    print("\n📊 Проверка Google Sheets...")
+    if get_google_sheet():
+        print("✅ Google Sheets: ПОДКЛЮЧЕНО")
+    else:
+        print("❌ Google Sheets: НЕ ПОДКЛЮЧЕНО")
+        print("   Проверьте переменные GOOGLE_CREDENTIALS и GOOGLE_SHEET_ID")
+    print("=" * 60)
+    
+    # Сбрасываем вебхук и останавливаем другие экземпляры
     reset_webhook()
     stop_other_instances()
     time.sleep(2)
     
-    print("⏳ Бот работает 24/7...")
+    print("\n⏳ Бот работает 24/7...")
     print("=" * 60)
     
+    # Бесконечный цикл с обработкой ошибок
     while True:
         try:
             bot.polling(none_stop=True, interval=0, timeout=20)
@@ -951,4 +1156,3 @@ if __name__ == '__main__':
             print("🔄 Перезапуск через 5 секунд...")
             time.sleep(5)
             continue
-
