@@ -763,11 +763,13 @@ def approve_master(message):
             bot.reply_to(message, f"❌ Анкета с ID {application_id} не найдена.")
             return
         
+        # Обновляем статус анкеты
         cursor.execute('''UPDATE master_applications 
                         SET status = 'Одобрена' 
                         WHERE id = ?''', (application_id,))
         
-       cursor.execute('''INSERT INTO masters
+        # Добавляем мастера в таблицу проверенных
+        cursor.execute('''INSERT INTO masters
                         (name, service, phone, districts, price_min, price_max, 
                          experience, portfolio, rating, reviews_count, status, created_at)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
@@ -777,10 +779,10 @@ def approve_master(message):
                          datetime.now().strftime("%d.%m.%Y %H:%M")))
         conn.commit()
         
-        # ========== ОБНОВЛЕНИЕ СТАТУСА В GOOGLE ТАБЛИЦЕ ==========
+        # Обновление статуса в Google Таблице
         update_master_status_in_google_sheet(application[1], 'Одобрена')
-        # ======================================================
         
+        # Уведомление мастеру
         try:
             bot.send_message(
                 application[1],
@@ -825,15 +827,16 @@ def reject_master(message):
             bot.reply_to(message, f"❌ Анкета с ID {application_id} не найдена.")
             return
         
+        # Обновляем статус анкеты
         cursor.execute('''UPDATE master_applications 
                         SET status = 'Отклонена' 
                         WHERE id = ?''', (application_id,))
         conn.commit()
         
-        # ========== ОБНОВЛЕНИЕ СТАТУСА В GOOGLE ТАБЛИЦЕ ==========
+        # Обновление статуса в Google Таблице
         update_master_status_in_google_sheet(application[1], 'Отклонена')
-        # ======================================================
         
+        # Уведомление мастеру
         try:
             bot.send_message(
                 application[1],
