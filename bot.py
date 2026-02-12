@@ -235,15 +235,34 @@ def search_master(message):
 @bot.message_handler(commands=['contacts'])
 @bot.message_handler(func=lambda message: message.text == '📞 Контакты')
 def contacts(message):
+    # Создаем инлайн-кнопки
+    markup = telebot.types.InlineKeyboardMarkup(row_width=1)
+    
+    btn_channel = telebot.types.InlineKeyboardButton(
+        text="📢 Канал с мастерами", 
+        url="https://t.me/remont_vl25"
+    )
+    btn_chat = telebot.types.InlineKeyboardButton(
+        text="💬 Чат-заявок", 
+        url="https://t.me/remontvl25chat"
+    )
+    btn_admin = telebot.types.InlineKeyboardButton(
+        text="👨‍💻 Администратор", 
+        url="https://t.me/remont_vl25"
+    )
+    
+    markup.add(btn_channel, btn_chat, btn_admin)
+    
     bot.send_message(
         message.chat.id,
         "📞 **КОНТАКТЫ**\n\n"
         "📢 **Канал с мастерами:** @remont_vl25\n"
-        "💬 **Чат-заявок:** @remont_vl25_chat\n"
+        "💬 **Чат-заявок:** @remontvl25chat\n"
         "🤖 **Этот бот:** @remont_vl25_chat_bot\n"
         "👨‍💻 **Администратор:** @remont_vl25\n\n"
         "📌 **По вопросам сотрудничества и рекламы** — пишите админу!",
-        parse_mode='Markdown'
+        parse_mode='Markdown',
+        reply_markup=markup
     )
 @bot.message_handler(func=lambda message: message.text == '📢 Канал с мастерами')
 def channel_link(message):
