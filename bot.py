@@ -3,6 +3,9 @@ import sqlite3
 import os
 import time
 import requests
+import json
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 
 # ================ НАСТРОЙКИ ================
@@ -16,11 +19,88 @@ CHAT_ID = "@remontvl25chat"  # Чат для заявок
 CHANNEL_LINK = "@remont_vl25"  # Канал с мастерами
 
 # ID администратора для уведомлений - ЗАМЕНИТЕ НА ВАШ!
-# Узнать свой ID: @userinfobot
-ADMIN_ID = 8111497942  # ⚠️ ВАЖНО: ВСТАВЬТЕ СВОЙ ID!
+ADMIN_ID = 123456789  # ⚠️ ВАЖНО: ВСТАВЬТЕ СВОЙ ID!
 
 # Создаем бота
 bot = telebot.TeleBot(TOKEN)
+
+# ================ GOOGLE SHEETS ИНТЕГРАЦИЯ ================
+def get_google_sheet():
+    """Подключение к Google Sheets"""
+    try:
+        google_creds_json = os.environ.get('GOOGLE_CREDENTIALS')
+        if not google_creds_json:
+            print("⚠️ GOOGLE_CREDENTIALS не найдены в переменных окружения")
+            return None
+        
+        creds_dict = json.loads(google_creds_json)
+        scope = ['https://spreadsheets.google.com/feeds',
+                 'https://www.googleapis.com/auth/drive']
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        client = gspread.authorize(creds)
+        
+        sheet_id = os.environ.get('GOOGLE_SHEET_ID')
+        if not sheet_id:
+            print("⚠️ GOOGLE_SHEET_ID не найден в переменных окружения")
+            return None
+        
+        sheet = client.open_by_key(sheet_id).worksheet('Мастера')
+        return sheet
+    except Exception as e:
+        print(f"❌ Ошибка подключения к Google Sheets: {e}")
+        return None
+
+def add_master_to_google_sheet(master_data):
+    """Добавление мастера в Google Sheets"""
+    try:
+        sheet = get_google_sheet()
+        if not sheet:
+            return False
+        
+        row = [
+            master_data.get('id', ''),              # A: ID
+            master_data.get('date', ''),            # B: Дата
+            master_data.get('name', ''),            # C: Имя
+            master_data.get('service', ''),         # D: Специализация
+            master_data.get('phone', ''),           # E: Телефон
+            master_data.get('districts', ''),       # F: Районы/ЖК
+            master_data.get('price_min', ''),       # G: Цена от
+            master_data.get('price_max', ''),       # H: Цена до
+            master_data.get('experience', ''),      # I: Опыт
+            master_data.get('portfolio', ''),       # J: Портфолио
+            master_data.get('documents', ''),       # K: Документы
+            master_data.get('rating', '4.8'),       # L: Рейтинг
+            master_data.get('reviews_count', '0'),  # M: Отзывов
+            master_data.get('status', 'На проверке'), # N: Статус
+            master_data.get('telegram_id', '')      # O: Telegram ID
+        ]
+        
+        sheet.append_row(row)
+        print(f"✅ Мастер {master_data.get('name')} добавлен в Google Sheets")
+        return True
+    except Exception as e:
+        print(f"❌ Ошибка добавления в Google Sheets: {e}")
+        return False
+
+def update_master_status_in_google_sheet(telegram_id, status):
+    """Обновление статуса мастера в Google Sheets"""
+    try:
+        sheet = get_google_sheet()
+        if not sheet:
+            return False
+        
+        all_records = sheet.get_all_records()
+        for i, record in enumerate(all_records, start=2):
+            if str(record.get('Telegram ID')) == str(telegram_id):
+                sheet.update_cell(i, 14, status)
+                print(f"✅ Статус мастера обновлён на '{status}' в Google Sheets")
+                return True
+        
+        print(f"⚠️ Мастер с Telegram ID {telegram_id} не найден в таблице")
+        return False
+    except Exception as e:
+        print(f"❌ Ошибка обновления статуса в Google Sheets: {e}")
+        return False
 
 # ================ БАЗА ДАННЫХ ================
 conn = sqlite3.connect('remont.db', check_same_thread=False)
@@ -81,7 +161,7 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS master_applications
                  status TEXT,
                  created_at TEXT)''')
 
-# Добавляем недостающие колонки (если их нет)
+# Добавляем недостающие колонки
 try:
     cursor.execute('ALTER TABLE requests ADD COLUMN description TEXT')
 except:
@@ -115,13 +195,11 @@ def stop_other_instances():
 # ================ КОМАНДА /start ================
 @bot.message_handler(commands=['start'])
 def start(message):
-    # Создаем клавиатуру
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.row('🔨 Оставить заявку', '⭐ Оставить отзыв')
     markup.row('🔍 Найти мастера', '📞 Контакты')
     markup.row('📢 Канал с мастерами', '👷 Стать мастером')
     
-    # Отправляем приветствие
     bot.send_message(
         message.chat.id,
         "👋 Добро пожаловать в бот заявок на ремонт!\n\n"
@@ -136,7 +214,6 @@ def start(message):
 # ================ КНОПКА "КАНАЛ С МАСТЕРАМИ" ================
 @bot.message_handler(func=lambda message: message.text == '📢 Канал с мастерами')
 def channel_link(message):
-    # Создаем инлайн-кнопку со ссылкой
     markup = telebot.types.InlineKeyboardMarkup()
     button = telebot.types.InlineKeyboardButton(
         text="📢 Перейти в канал", 
@@ -177,7 +254,6 @@ def request_service(message):
 def process_service(message):
     service_input = message.text.strip().lower()
     
-    # Преобразуем цифру в название услуги
     if service_input == "1" or "сантехник" in service_input:
         service = "Сантехник"
     elif service_input == "2" or "электрик" in service_input:
@@ -189,7 +265,6 @@ def process_service(message):
     elif service_input == "5" or "другое" in service_input:
         service = "Другое"
     else:
-        # Если пользователь ввел что-то своё
         service = service_input.capitalize()
     
     msg = bot.send_message(
@@ -240,7 +315,6 @@ def process_date(message, service, description, district):
 def process_budget(message, service, description, district, date):
     budget = message.text
     
-    # Сохраняем в БД
     cursor.execute('''INSERT INTO requests 
                     (user_id, username, service, description, district, date, budget, status, created_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
@@ -251,7 +325,6 @@ def process_budget(message, service, description, district, date):
                      datetime.now().strftime("%d.%m.%Y %H:%M")))
     conn.commit()
     
-    # Отправляем заявку в чат
     username = message.from_user.username or message.from_user.first_name
     request_text = f"""
 🆕 **НОВАЯ ЗАЯВКА!**
@@ -300,7 +373,6 @@ def process_review_master(message):
 def process_review_text(message, master):
     review_text = message.text
     
-    # Клавиатура с оценкой
     markup = telebot.types.InlineKeyboardMarkup(row_width=5)
     buttons = [
         telebot.types.InlineKeyboardButton("⭐", callback_data=f"rating_1_{master}"),
@@ -325,7 +397,6 @@ def rating_callback(call):
     rating = data[1]
     master = '_'.join(data[2:])
     
-    # Сохраняем отзыв
     cursor.execute('''INSERT INTO reviews
                     (master_name, user_name, rating, created_at)
                     VALUES (?, ?, ?, ?)''',
@@ -350,7 +421,6 @@ def rating_callback(call):
 @bot.message_handler(commands=['search'])
 @bot.message_handler(func=lambda message: message.text == '🔍 Найти мастера')
 def search_master(message):
-    # Получаем статистику из БД
     cursor.execute("SELECT service, COUNT(*), AVG(rating) FROM masters GROUP BY service")
     masters_stats = cursor.fetchall()
     
@@ -369,7 +439,6 @@ def search_master(message):
     text += f"Зайдите в чат и оставьте заявку:\n"
     text += f"{CHAT_ID}"
     
-    # Кнопка с каналом
     markup = telebot.types.InlineKeyboardMarkup()
     btn_channel = telebot.types.InlineKeyboardButton(
         text="📢 Подписаться на канал", 
@@ -387,7 +456,6 @@ def search_master(message):
 @bot.message_handler(commands=['contacts'])
 @bot.message_handler(func=lambda message: message.text == '📞 Контакты')
 def contacts(message):
-    # Создаем инлайн-кнопки
     markup = telebot.types.InlineKeyboardMarkup(row_width=1)
     
     btn_channel = telebot.types.InlineKeyboardButton(
@@ -474,7 +542,6 @@ def process_master_name(message):
 def process_master_service(message, name):
     service_input = message.text.strip().lower()
     
-    # Преобразуем в название услуги
     if service_input == "1" or "сантехник" in service_input:
         service = "Сантехник"
     elif service_input == "2" or "электрик" in service_input:
@@ -574,7 +641,6 @@ def process_master_portfolio(message, name, service, phone, districts, price_min
 def process_master_documents(message, name, service, phone, districts, price_min, price_max, experience, portfolio):
     documents = message.text
     
-    # Сохраняем в базу данных
     cursor.execute('''INSERT INTO master_applications
                     (user_id, username, name, service, phone, districts, 
                      price_min, price_max, experience, portfolio, documents, status, created_at)
@@ -587,10 +653,30 @@ def process_master_documents(message, name, service, phone, districts, price_min
                      datetime.now().strftime("%d.%m.%Y %H:%M")))
     conn.commit()
     
-    # Получаем ID последней вставленной записи
     application_id = cursor.lastrowid
     
-    # Отправляем администратору уведомление
+    # ========== ОТПРАВКА В GOOGLE ТАБЛИЦУ ==========
+    master_data = {
+        'id': application_id,
+        'date': datetime.now().strftime("%d.%m.%Y"),
+        'name': name,
+        'service': service,
+        'phone': phone,
+        'districts': districts,
+        'price_min': price_min,
+        'price_max': price_max,
+        'experience': experience,
+        'portfolio': portfolio,
+        'documents': documents,
+        'rating': '4.8',
+        'reviews_count': '0',
+        'status': 'На проверке',
+        'telegram_id': message.from_user.id
+    }
+    
+    add_master_to_google_sheet(master_data)
+    # ==============================================
+    
     admin_message = f"""
 🆕 **НОВАЯ АНКЕТА МАСТЕРА!** (ID: {application_id})
 
@@ -607,6 +693,7 @@ def process_master_documents(message, name, service, phone, districts, price_min
 🆔 **ID:** {message.from_user.id}
 
 **Статус:** ⏳ На проверке
+📊 **Google Таблица:** обновлена
 
 ✅ Одобрить: /approve {application_id}
 ❌ Отклонить: /reject {application_id} [причина]
@@ -617,7 +704,6 @@ def process_master_documents(message, name, service, phone, districts, price_min
     except Exception as e:
         print(f"⚠️ Не удалось отправить уведомление админу: {e}")
     
-    # Отправляем мастеру подтверждение
     bot.send_message(
         message.chat.id,
         "✅ **ВАША АНКЕТА ОТПРАВЛЕНА!**\n\n"
@@ -626,6 +712,7 @@ def process_master_documents(message, name, service, phone, districts, price_min
         "1. Администратор проверит анкету (обычно 1-2 дня)\n"
         "2. Мы можем запросить фото работ или отзывы\n"
         "3. После проверки ваша карточка появится в канале\n\n"
+        f"📊 Данные также сохранены в Google Таблице\n\n"
         "Статус проверки можно узнать по команде /my_status"
     )
 
@@ -657,7 +744,6 @@ def my_status(message):
 # ================ КОМАНДЫ АДМИНИСТРАТОРА ================
 @bot.message_handler(commands=['approve'])
 def approve_master(message):
-    # Проверка, что это админ
     if message.from_user.id != ADMIN_ID:
         bot.reply_to(message, "❌ У вас нет прав для этой команды.")
         return
@@ -670,7 +756,6 @@ def approve_master(message):
         
         application_id = int(parts[1])
         
-        # Получаем данные анкеты
         cursor.execute('SELECT * FROM master_applications WHERE id = ?', (application_id,))
         application = cursor.fetchone()
         
@@ -678,13 +763,11 @@ def approve_master(message):
             bot.reply_to(message, f"❌ Анкета с ID {application_id} не найдена.")
             return
         
-        # Обновляем статус анкеты
         cursor.execute('''UPDATE master_applications 
                         SET status = 'Одобрена' 
                         WHERE id = ?''', (application_id,))
         
-        # Добавляем мастера в таблицу проверенных
-        cursor.execute('''INSERT INTO masters
+       cursor.execute('''INSERT INTO masters
                         (name, service, phone, districts, price_min, price_max, 
                          experience, portfolio, rating, reviews_count, status, created_at)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
@@ -694,13 +777,17 @@ def approve_master(message):
                          datetime.now().strftime("%d.%m.%Y %H:%M")))
         conn.commit()
         
-        # Отправляем уведомление мастеру
+        # ========== ОБНОВЛЕНИЕ СТАТУСА В GOOGLE ТАБЛИЦЕ ==========
+        update_master_status_in_google_sheet(application[1], 'Одобрена')
+        # ======================================================
+        
         try:
             bot.send_message(
-                application[1],  # user_id
+                application[1],
                 "✅ **ВАША АНКЕТА ОДОБРЕНА!**\n\n"
                 "Поздравляем! Теперь вы в базе проверенных мастеров.\n"
                 f"Ваша карточка будет опубликована в канале {CHANNEL_LINK}\n\n"
+                f"📊 Статус обновлен в Google Таблице\n\n"
                 "📌 **Что дальше?**\n"
                 "1. Мы подготовим вашу карточку\n"
                 "2. Вы получите заявки из чата\n"
@@ -709,7 +796,7 @@ def approve_master(message):
         except:
             pass
         
-        bot.reply_to(message, f"✅ Мастер {application[3]} одобрен!")
+        bot.reply_to(message, f"✅ Мастер {application[3]} одобрен! Статус обновлен в Google Таблице.")
         
     except ValueError:
         bot.reply_to(message, "❌ ID анкеты должен быть числом.")
@@ -718,7 +805,6 @@ def approve_master(message):
 
 @bot.message_handler(commands=['reject'])
 def reject_master(message):
-    # Проверка, что это админ
     if message.from_user.id != ADMIN_ID:
         bot.reply_to(message, "❌ У вас нет прав для этой команды.")
         return
@@ -732,7 +818,6 @@ def reject_master(message):
         application_id = int(parts[1])
         reason = ' '.join(parts[2:]) if len(parts) > 2 else 'Не указана'
         
-        # Получаем данные анкеты
         cursor.execute('SELECT * FROM master_applications WHERE id = ?', (application_id,))
         application = cursor.fetchone()
         
@@ -740,30 +825,43 @@ def reject_master(message):
             bot.reply_to(message, f"❌ Анкета с ID {application_id} не найдена.")
             return
         
-        # Обновляем статус анкеты
         cursor.execute('''UPDATE master_applications 
                         SET status = 'Отклонена' 
                         WHERE id = ?''', (application_id,))
         conn.commit()
         
-        # Отправляем уведомление мастеру
+        # ========== ОБНОВЛЕНИЕ СТАТУСА В GOOGLE ТАБЛИЦЕ ==========
+        update_master_status_in_google_sheet(application[1], 'Отклонена')
+        # ======================================================
+        
         try:
             bot.send_message(
                 application[1],
                 f"❌ **ВАША АНКЕТА ОТКЛОНЕНА**\n\n"
                 f"**Причина:** {reason}\n\n"
                 f"Свяжитесь с администратором: @remont_vl25\n\n"
+                f"📊 Статус обновлен в Google Таблице\n\n"
                 f"Вы можете подать заявку снова после исправления замечаний."
             )
         except:
             pass
         
-        bot.reply_to(message, f"❌ Мастер {application[3]} отклонён. Причина: {reason}")
+        bot.reply_to(message, f"❌ Мастер {application[3]} отклонён. Причина: {reason}. Статус обновлен в Google Таблице.")
         
     except ValueError:
         bot.reply_to(message, "❌ ID анкеты должен быть числом.")
     except Exception as e:
         bot.reply_to(message, f"❌ Ошибка: {e}")
+
+# ================ ТЕСТОВАЯ КОМАНДА ДЛЯ ПРОВЕРКИ GOOGLE SHEETS ================
+@bot.message_handler(commands=['test_sheet'])
+def test_sheet(message):
+    if message.from_user.id == ADMIN_ID:
+        sheet = get_google_sheet()
+        if sheet:
+            bot.reply_to(message, "✅ Подключение к Google Sheets работает! Таблица найдена.")
+        else:
+            bot.reply_to(message, "❌ Ошибка подключения к Google Sheets. Проверьте переменные GOOGLE_CREDENTIALS и GOOGLE_SHEET_ID")
 
 # ================ ОБРАБОТКА ТЕКСТОВЫХ СООБЩЕНИЙ ================
 @bot.message_handler(func=lambda message: True)
@@ -781,23 +879,22 @@ def echo_all(message):
 
 # ================ ЗАПУСК БОТА ================
 if __name__ == '__main__':
-    print("=" * 50)
+    print("=" * 60)
     print("✅ Бот запускается...")
     print(f"🤖 Токен: {TOKEN[:10]}... (скрыт)")
     print(f"💬 Чат: {CHAT_ID}")
     print(f"📢 Канал: {CHANNEL_LINK}")
     print(f"👑 Админ ID: {ADMIN_ID}")
-    print("=" * 50)
+    print(f"📊 Google Sheets: {'Подключен' if get_google_sheet() else 'Не подключен'}")
+    print("=" * 60)
     
-    # Сбрасываем вебхук и останавливаем другие экземпляры
     reset_webhook()
     stop_other_instances()
     time.sleep(2)
     
     print("⏳ Бот работает 24/7...")
-    print("=" * 50)
+    print("=" * 60)
     
-    # Бесконечный цикл с обработкой ошибок
     while True:
         try:
             bot.polling(none_stop=True, interval=0, timeout=20)
@@ -810,3 +907,4 @@ if __name__ == '__main__':
             print("🔄 Перезапуск через 5 секунд...")
             time.sleep(5)
             continue
+
