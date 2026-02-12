@@ -1,10 +1,11 @@
 import telebot
 import sqlite3
+import os
 from datetime import datetime
 
-# ⚠️ ВАШ ТОКЕН (УЖЕ ВСТАВЛЕН)
-TOKEN = "8534116247:AAEBwp0J1b_r-rUIU_au5QEiggCVYQgA-5c"
-CHAT_ID = "@remont_vl25_chat"  # ID вашего чата
+# ⚠️ ТОКЕН из переменных окружения Railway
+TOKEN = os.environ.get('TOKEN', "8534116247:AAEBwp0J1b_r-rUIU_au5QEiggCVYQgA-5c")
+CHAT_ID = "@remont_vl25_chat"
 
 bot = telebot.TeleBot(TOKEN)
 
@@ -180,47 +181,6 @@ def process_review_text(message, master):
         reply_markup=markup,
         parse_mode='Markdown'
     )
-    
-    # Сохраняем текст отзыва временно (в следующем шаге сохраним с рейтингом)
-    bot.register_next_step_handler_by_chat_id(
-        message.chat.id,
-        lambda msg: save_review_with_rating(msg, master, review_text)
-    )
-
-def save_review_with_rating(message, master, review_text):
-    # Этот метод сработает, если пользователь не нажал кнопку, а написал текст
-    try:
-        rating = int(message.text.strip())
-        if rating < 1 or rating > 5:
-            raise ValueError
-    except:
-        bot.send_message(
-            message.chat.id,
-            "❌ Пожалуйста, используйте кнопки с оценкой 1-5!",
-            parse_mode='Markdown'
-        )
-        return
-    
-    # Сохраняем отзыв
-    cursor.execute('''INSERT INTO reviews
-                    (master_name, user_name, rating, text, created_at)
-                    VALUES (?, ?, ?, ?, ?)''',
-                    (master,
-                     message.from_user.username or message.from_user.first_name,
-                     rating,
-                     review_text,
-                     datetime.now().strftime("%d.%m.%Y %H:%M")))
-    conn.commit()
-    
-    bot.send_message(
-        message.chat.id,
-        f"✅ **СПАСИБО ЗА ОТЗЫВ!**\n\n"
-        f"👤 **Мастер:** {master}\n"
-        f"⭐ **Оценка:** {'⭐' * rating}\n"
-        f"📝 **Отзыв:** {review_text}\n\n"
-        f"Ваш отзыв поможет другим соседям выбрать хорошего мастера!",
-        parse_mode='Markdown'
-    )
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('rating_'))
 def rating_callback(call):
@@ -320,28 +280,20 @@ def help_command(message):
         parse_mode='Markdown'
     )
 
-# ОБРАБОТКА ТЕКСТОВЫХ СООБЩЕНИЙ
-@bot.message_handler(func=lambda message: True)
-def echo_all(message):
-    if message.text.startswith('/'):
-        bot.send_message(
-            message.chat.id,
-            "❌ Неизвестная команда. Используйте /help для списка команд.",
-            parse_mode='Markdown'
-        )
-    else:
-        bot.send_message(
-            message.chat.id,
-            "👋 Используйте команды из меню или нажмите /help",
-            parse_mode='Markdown'
-        )
-
-# ЗАПУСК БОТА
+# ============= ИСПРАВЛЕННЫЙ ЗАПУСК =============
 if __name__ == '__main__':
-    import os
     print("✅ Бот запущен на Railway!")
-    TOKEN = os.environ.get('TOKEN', TOKEN)  # Берет токен из переменных
-    bot.polling(none_stop=True)
-    except Exception as e:
-        print(f"❌ Ошибка: {e}")
-      
+    print(f"🤖 Токен: {TOKEN[:10]}...")
+    print(f"📢 Чат: {CHAT_ID}")
+    print("⏳ Бот работает 24/7...")
+    
+    # Бесконечный цикл с обработкой ошибок
+    while True:
+        try:
+            bot.polling(none_stop=True, interval=0, timeout=20)
+        except Exception as e:
+            print(f"❌ Ошибка: {e}")
+            print("🔄 Перезапуск через 3 секунды...")
+            import time
+            time.sleep(3)
+            continue
