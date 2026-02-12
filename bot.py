@@ -85,7 +85,9 @@ def channel_link(message):
 def request_service(message):
     msg = bot.send_message(
         message.chat.id,
-        "🔨 ВЫБЕРИТЕ УСЛУГУ:\n\n"
+        "🔨 **СОЗДАНИЕ ЗАЯВКИ**\n\n"
+        "Шаг 1 из 4\n"
+        "👇 **ВЫБЕРИТЕ УСЛУГУ:**\n\n"
         "Напишите номер или название:\n"
         "1 - Сантехник\n"
         "2 - Электрик\n"
@@ -99,57 +101,96 @@ def process_service(message):
     service = message.text
     msg = bot.send_message(
         message.chat.id,
-        "📍 ВВЕДИТЕ РАЙОН ИЛИ ЖК:\n"
+        "📝 **Шаг 2 из 4**\n\n"
+        "👇 **КРАТКО ОПИШИТЕ ЗАДАЧУ:**\n\n"
+        "Например:\n"
+        "• Заменить смеситель на кухне\n"
+        "• Перенести 3 розетки в зале\n"
+        "• Поклеить обои в спальне 15м²",
+        parse_mode='Markdown'
+    )
+    bot.register_next_step_handler(msg, process_description, service)
+def process_description(message, service):
+    description = message.text
+    msg = bot.send_message(
+        message.chat.id,
+        "📍 **Шаг 3 из 4**\n\n"
+        "👇 **ВВЕДИТЕ РАЙОН ИЛИ ЖК:**\n"
         "Например: Патрокл, Снеговая Падь, Варяг, Океан"
     )
-    bot.register_next_step_handler(msg, process_district, service)
-
-def process_district(message, service):
+    bot.register_next_step_handler(msg, process_district, service, description)
+def process_district(message, service, description):
     district = message.text
     msg = bot.send_message(
         message.chat.id,
-        "💰 ВВЕДИТЕ БЮДЖЕТ:\n"
+        "📅 **Шаг 4 из 4**\n\n"
+        "👇 **КОГДА НУЖНО ВЫПОЛНИТЬ РАБОТЫ?**\n\n"
+        "Например:\n"
+        "• Сегодня вечером\n"
+        "• Завтра с 10:00\n"
+        "• На этой неделе\n"
+        "• Дата договорная"
+    )
+    bot.register_next_step_handler(msg, process_date, service, description, district)
+def process_date(message, service, description, district):
+    date = message.text
+    msg = bot.send_message(
+        message.chat.id,
+        "💰 **ФИНАЛЬНЫЙ ШАГ**\n\n"
+        "👇 **ВВЕДИТЕ БЮДЖЕТ:**\n"
         "Например: до 3000₽, договорной, 50000₽ за квартиру"
     )
-    bot.register_next_step_handler(msg, process_budget, service, district)
-
-def process_budget(message, service, district):
+    bot.register_next_step_handler(msg, process_budget, service, description, district, date)
+def process_budget(message, service, description, district, date):
     budget = message.text
     
-    # Сохраняем в БД
+    # Сохраняем в БД (добавляем новые колонки)
     cursor.execute('''INSERT INTO requests 
-                    (user_id, username, service, district, budget, status, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                    (user_id, username, service, description, district, date, budget, status, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                     (message.from_user.id,
                      message.from_user.username or message.from_user.first_name,
-                     service, district, budget,
+                     service, description, district, date, budget,
                      'активна',
                      datetime.now().strftime("%d.%m.%Y %H:%M")))
     conn.commit()
     
-    # Отправляем заявку в чат
+    # Отправляем заявку в чат с НОВЫМИ полями
     username = message.from_user.username or message.from_user.first_name
     request_text = f"""
-🆕 НОВАЯ ЗАЯВКА!
+🆕 **НОВАЯ ЗАЯВКА!**
 
-👤 От: @{username}
-🔨 Услуга: {service}
-📍 Район/ЖК: {district}
-💰 Бюджет: {budget}
-⏰ Время: {datetime.now().strftime("%H:%M")}
+👤 **От:** @{username}
+🔨 **Услуга:** {service}
+📝 **Задача:** {description}
+📍 **Район/ЖК:** {district}
+📅 **Когда:** {date}
+💰 **Бюджет:** {budget}
+⏰ **Создано:** {datetime.now().strftime("%H:%M %d.%m.%Y")}
 
-👇 Мастера, откликайтесь в комментариях!
+👇 **Мастера, откликайтесь в комментариях!**
     """
     
-    bot.send_message(CHAT_ID, request_text)
+    bot.send_message(CHAT_ID, request_text, parse_mode='Markdown')
     
     bot.send_message(
         message.chat.id,
-        f"✅ ЗАЯВКА ОПУБЛИКОВАНА!\n\n"
-        f"💬 Чат с мастерами: {CHAT_ID}\n"
-        f"⏱ Ожидайте откликов в течение 5-10 минут."
+        f"✅ **ЗАЯВКА ОПУБЛИКОВАНА!**\n\n"
+        f"📢 Чат с мастерами: {CHAT_ID}\n"
+        f"⏱ Ожидайте откликов в течение 5-10 минут.\n\n"
+        f"📌 Если никто не ответил за 30 минут — создайте новую заявку.",
+        parse_mode='Markdown'
     )
+# Добавляем новые колонки в таблицу requests (если их ещё нет)
+try:
+    cursor.execute('ALTER TABLE requests ADD COLUMN description TEXT')
+except:
+    pass  # колонка уже есть
 
+try:
+    cursor.execute('ALTER TABLE requests ADD COLUMN date TEXT')
+except:
+    pass  # колонка уже есть
 # ================ ОТЗЫВ ================
 @bot.message_handler(commands=['review'])
 @bot.message_handler(func=lambda message: message.text == '⭐ Оставить отзыв')
