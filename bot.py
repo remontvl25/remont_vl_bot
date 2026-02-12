@@ -50,6 +50,7 @@ def start(message):
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.row('🔨 Оставить заявку', '⭐ Оставить отзыв')
     markup.row('🔍 Найти мастера', '📞 Контакты')
+    markup.row('📢 Канал с мастерами')  # НОВАЯ КНОПКА!
     
     bot.send_message(
         message.chat.id,
