@@ -223,13 +223,23 @@ def search_master(message):
     text += "• Строители: 2 мастера ⭐4.6\n\n"
     text += "👉 **Хотите найти мастера?**\n"
     text += "Зайдите в чат и оставьте заявку:\n"
-    text += "@remont_vl25_chat"
+    text += "@remontvl25chat"
+    
+    # Добавляем кнопку с каналом
+    markup = telebot.types.InlineKeyboardMarkup()
+    btn_channel = telebot.types.InlineKeyboardButton(
+        text="📢 Подписаться на канал", 
+        url="https://t.me/remont_vl25"
+    )
+    markup.add(btn_channel)
     
     bot.send_message(
         message.chat.id,
         text,
-        parse_mode='Markdown'
+        parse_mode='Markdown',
+        reply_markup=markup
     )
+
 
 # КОНТАКТЫ
 @bot.message_handler(commands=['contacts'])
