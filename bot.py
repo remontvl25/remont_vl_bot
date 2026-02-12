@@ -338,13 +338,10 @@ def echo_all(message):
 
 # ЗАПУСК БОТА
 if __name__ == '__main__':
-    print("✅ Бот запущен и готов к работе!")
-    print(f"🤖 Токен: {TOKEN[:10]}...")
-    print(f"📢 Чат: {CHAT_ID}")
-    print("⏳ Ожидание сообщений...")
-    
-    try:
-        bot.polling(none_stop=True, interval=0, timeout=20)
+    import os
+    print("✅ Бот запущен на Railway!")
+    TOKEN = os.environ.get('TOKEN', TOKEN)  # Берет токен из переменных
+    bot.polling(none_stop=True)
     except Exception as e:
         print(f"❌ Ошибка: {e}")
       
