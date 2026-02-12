@@ -7,6 +7,134 @@ import time
 import requests
 from datetime import datetime
 
+# ================ GOOGLE SHEETS ИНТЕГРАЦИЯ ================
+def get_google_sheet():
+    """Подключение к Google Sheets с подробной отладкой"""
+    try:
+        print("🔍 Начинаем подключение к Google Sheets...")
+        
+        google_creds_json = os.environ.get('GOOGLE_CREDENTIALS')
+        if not google_creds_json:
+            print("❌ GOOGLE_CREDENTIALS не найдены в переменных окружения")
+            return None
+        
+        print(f"✅ GOOGLE_CREDENTIALS найдены, длина: {len(google_creds_json)} символов")
+        
+        # Пробуем распарсить JSON
+        try:
+            import json
+            creds_dict = json.loads(google_creds_json)
+            print(f"✅ JSON распарсен успешно")
+            print(f"📧 client_email: {creds_dict.get('client_email', 'НЕТ!')}")
+        except Exception as e:
+            print(f"❌ Ошибка парсинга JSON: {e}")
+            return None
+        
+        # Авторизация
+        scope = [
+            'https://spreadsheets.google.com/feeds',
+            'https://www.googleapis.com/auth/drive'
+        ]
+        
+        from oauth2client.service_account import ServiceAccountCredentials
+        import gspread
+        
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+        client = gspread.authorize(creds)
+        print(f"✅ Авторизация в Google API успешна")
+        
+        sheet_id = os.environ.get('GOOGLE_SHEET_ID')
+        if not sheet_id:
+            print("❌ GOOGLE_SHEET_ID не найден в переменных окружения")
+            return None
+        
+        print(f"✅ GOOGLE_SHEET_ID: {sheet_id}")
+        
+        # Открываем таблицу по ID
+        try:
+            spreadsheet = client.open_by_key(sheet_id)
+            print(f"✅ Таблица найдена: {spreadsheet.title}")
+            
+            # Пытаемся открыть лист 'Мастера', иначе первый лист
+            try:
+                sheet = spreadsheet.worksheet('Мастера')
+                print(f"✅ Лист 'Мастера' найден")
+            except:
+                sheet = spreadsheet.sheet1
+                print(f"⚠️ Лист 'Мастера' не найден, используем '{sheet.title}'")
+            
+            return sheet
+        except gspread.exceptions.SpreadsheetNotFound:
+            print(f"❌ Таблица с ID {sheet_id} не найдена. Проверьте ID и доступ.")
+            return None
+        except Exception as e:
+            print(f"❌ Ошибка при открытии таблицы: {e}")
+            return None
+            
+    except ImportError:
+        print("❌ Библиотеки gspread или oauth2client не установлены!")
+        print("   Добавьте в requirements.txt: gspread==6.1.2 oauth2client==4.1.3")
+        return None
+    except Exception as e:
+        print(f"❌ Общая ошибка подключения к Google Sheets: {e}")
+        return None
+
+def add_master_to_google_sheet(master_data):
+    """Добавление мастера в Google Sheets"""
+    try:
+        sheet = get_google_sheet()
+        if not sheet:
+            print("❌ add_master_to_google_sheet: нет доступа к таблице")
+            return False
+        
+        # Подготовка строки – ровно 15 колонок
+        row = [
+            str(master_data.get('id', '')),
+            str(master_data.get('date', '')),
+            str(master_data.get('name', '')),
+            str(master_data.get('service', '')),
+            str(master_data.get('phone', '')),
+            str(master_data.get('districts', '')),
+            str(master_data.get('price_min', '')),
+            str(master_data.get('price_max', '')),
+            str(master_data.get('experience', '')),
+            str(master_data.get('portfolio', 'Не указано')),
+            str(master_data.get('documents', 'Не указано')),
+            str(master_data.get('rating', '4.8')),
+            str(master_data.get('reviews_count', '0')),
+            str(master_data.get('status', 'На проверке')),
+            str(master_data.get('telegram_id', ''))
+        ]
+        
+        print(f"📤 Добавляем строку в Google Sheets: {row}")
+        sheet.append_row(row)
+        print(f"✅ Мастер {master_data.get('name')} добавлен в Google Sheets")
+        return True
+    except Exception as e:
+        print(f"❌ Ошибка добавления в Google Sheets: {e}")
+        return False
+
+def update_master_status_in_google_sheet(telegram_id, status):
+    """Обновление статуса мастера в Google Sheets по Telegram ID"""
+    try:
+        sheet = get_google_sheet()
+        if not sheet:
+            return False
+        
+        # Получаем все записи
+        all_records = sheet.get_all_records()
+        for i, record in enumerate(all_records, start=2):  # start=2, т.к. 1-я строка - заголовки
+            if str(record.get('Telegram ID')) == str(telegram_id):
+                sheet.update_cell(i, 14, status)  # колонка N = статус
+                print(f"✅ Статус мастера обновлён на '{status}' в Google Sheets")
+                return True
+        
+        print(f"⚠️ Мастер с Telegram ID {telegram_id} не найден в таблице")
+        return False
+    except Exception as e:
+        print(f"❌ Ошибка обновления статуса в Google Sheets: {e}")
+        return False
+
 # ================ БЛОКИРОВКА ЗАПУСКА ВТОРОГО ЭКЗЕМПЛЯРА ================
 def single_instance():
     """Блокировка запуска второго экземпляра"""
