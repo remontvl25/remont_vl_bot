@@ -4,7 +4,7 @@ import os
 from datetime import datetime
 
 # ⚠️ ТОКЕН из переменных окружения Railway
-TOKEN = os.environ.get('TOKEN', "8534116247:AAEBwp0J1b_r-rUIU_au5QEiggCVYQgA-5c")
+TOKEN = os.environ.get('TOKEN')
 CHAT_ID = "@remont_vl25_chat"  # ID чата для публикации заявок
 CHAT_LINK = "@remont_vl25_chat"  # Ссылка для отображения
 
