@@ -170,6 +170,29 @@ except:
 
 conn.commit()
 
+# ================ АВТОМАТИЧЕСКОЕ ОБНОВЛЕНИЕ СТРУКТУРЫ БАЗЫ ================
+try:
+    cursor.execute("PRAGMA table_info(master_applications)")
+    columns = [col[1] for col in cursor.fetchall()]
+    if 'services' not in columns:
+        cursor.execute("ALTER TABLE master_applications ADD COLUMN services TEXT")
+    if 'source' not in columns:
+        cursor.execute("ALTER TABLE master_applications ADD COLUMN source TEXT DEFAULT 'bot'")
+
+    cursor.execute("PRAGMA table_info(masters)")
+    columns = [col[1] for col in cursor.fetchall()]
+    if 'services' not in columns:
+        cursor.execute("ALTER TABLE masters ADD COLUMN services TEXT")
+    if 'source' not in columns:
+        cursor.execute("ALTER TABLE masters ADD COLUMN source TEXT DEFAULT 'bot'")
+    if 'channel_message_id' not in columns:
+        cursor.execute("ALTER TABLE masters ADD COLUMN channel_message_id INTEGER")
+
+    conn.commit()
+    print("✅ Структура базы данных обновлена")
+except Exception as e:
+    print(f"⚠️ Не удалось обновить структуру БД: {e}")
+
 # ================ ФУНКЦИИ GOOGLE SHEETS ================
 def get_google_sheet():
     if not GOOGLE_SHEETS_AVAILABLE:
