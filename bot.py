@@ -462,6 +462,53 @@ def guest_register(message):
     bot.send_message(message.chat.id, "✅ Теперь вы – мастер. Заполните анкету для получения заказов.")
     become_master(message)
 
+# ================ ОБРАБОТЧИК НОВЫХ УЧАСТНИКОВ В ЧАТЕ ================
+def is_new_member(chat_member_update):
+    """Проверяет, что пользователь только что вошёл в чат"""
+    old_status = chat_member_update.old_chat_member.status
+    new_status = chat_member_update.new_chat_member.status
+    # Пользователь не был участником (или был забанен/ушел), а теперь стал обычным участником
+    return (old_status in ['left', 'kicked'] and new_status == 'member')
+
+@bot.chat_member_handler()
+def greet_new_member(chat_member_update):
+    # Проверяем, что событие произошло в нужном чате
+    if chat_member_update.chat.id != CHAT_ID.strip('@'):
+        return
+
+    if not is_new_member(chat_member_update):
+        return
+
+    user = chat_member_update.new_chat_member.user
+    user_id = user.id
+    username = user.username or ""
+
+    # Проверяем, не зарегистрирован ли пользователь уже (есть ли в таблице users)
+    cursor.execute('SELECT role FROM users WHERE user_id = ?', (user_id,))
+    existing = cursor.fetchone()
+
+    # Если пользователь уже есть в базе – не спамим приветствием
+    if existing:
+        return
+
+    # Отправляем приветствие в ЛС
+    try:
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            types.InlineKeyboardButton("🔨 Я клиент, ищу мастера", callback_data="role_client"),
+            types.InlineKeyboardButton("👷 Я мастер", callback_data="role_master")
+        )
+        bot.send_message(
+            user_id,
+            f"👋 **Привет, {user.first_name}!**\n\n"
+            f"Ты присоединился к нашему чату @remontvl25chat.\n"
+            f"Кто ты? Выбери роль, чтобы мы могли предложить нужный функционал.",
+            reply_markup=markup
+        )
+    except Exception as e:
+        # Пользователь мог заблокировать бота – просто игнорируем
+        print(f"Не удалось отправить приветствие пользователю {user_id}: {e}")
+
 # ================ КНОПКА "КАНАЛ С МАСТЕРАМИ" ================
 @bot.message_handler(func=lambda message: message.text == '📢 Канал с мастерами')
 def channel_link(message):
