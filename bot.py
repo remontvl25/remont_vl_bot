@@ -276,12 +276,12 @@ def only_private(message):
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton(
             "🤖 Перейти в бота",
-            url="https://t.me/remont_vl25_final_bot"
+            url="https://t.me/remont_vl25_chat_bot"
         ))
         bot.reply_to(
             message,
             "❌ Эта команда работает только в личных сообщениях с ботом.\n\n"
-            "👉 Напишите мне в ЛС: @remont_vl25_final_bot",
+            "👉 Напишите мне в ЛС: @remont_vl25_chat_bot",
             reply_markup=markup
         )
         return False
@@ -290,7 +290,7 @@ def only_private(message):
 # ================ УДАЛЕНИЕ КОМАНД В ЧАТЕ ================
 @bot.message_handler(func=lambda message: message.chat.type != 'private')
 def delete_group_commands(message):
-    if message.text and (message.text.startswith('/') or '@remont_vl25_final_bot' in message.text):
+    if message.text and (message.text.startswith('/') or '@remont_vl25_chat_bot' in message.text):
         try:
             bot.delete_message(message.chat.id, message.message_id)
         except:
@@ -303,7 +303,7 @@ def start(message):
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton(
             "🤖 Перейти в бота",
-            url="https://t.me/remont_vl25_final_bot"
+            url="https://t.me/remont_vl25_chat_bot"
         ))
         bot.reply_to(
             message,
@@ -1081,7 +1081,7 @@ def contacts(message):
         f"📞 **КОНТАКТЫ**\n\n"
         f"📢 **Канал с мастерами:** {CHANNEL_LINK}\n"
         f"💬 **Чат-заявок:** {CHAT_ID}\n"
-        f"🤖 **Этот бот:** @remont_vl25_final_bot\n"
+        f"🤖 **Этот бот:** @remont_vl25_chat_bot\n"
         f"👨‍💻 **Администратор:** @remont_vl25\n\n"
         f"📌 По вопросам сотрудничества и рекламы — пишите админу!",
         reply_markup=markup
