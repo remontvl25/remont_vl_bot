@@ -429,11 +429,23 @@ def channel_link(message):
 def forms_link(message):
     if not only_private(message):
         return
+
+    # Защита от отсутствия ссылки
+    GOOGLE_FORMS_URL = os.environ.get('GOOGLE_FORMS_URL', '')
+    if not GOOGLE_FORMS_URL or GOOGLE_FORMS_URL == 'https://forms.gle/your_form_link':
+        bot.send_message(
+            message.chat.id,
+            "❌ Ссылка на анкету ещё не настроена.\n"
+            "Пожалуйста, обратитесь к администратору."
+        )
+        return
+
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton(
         "📋 Перейти к анкете",
         url=GOOGLE_FORMS_URL
     ))
+
     bot.send_message(
         message.chat.id,
         "📋 **Анкета мастера в Google Forms**\n\n"
