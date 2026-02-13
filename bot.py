@@ -41,7 +41,7 @@ CHAT_ID = os.environ.get('CHAT_ID', "@remontvl25chat")
 CHANNEL_LINK = os.environ.get('CHANNEL_LINK', "@remont_vl25")
 ADMIN_ID = int(os.environ.get('ADMIN_ID', '0'))
 
-# Для Google Forms – замените на реальную ссылку после создания формы
+# Ссылка на Google Forms (замените на реальную после создания формы)
 GOOGLE_FORMS_URL = os.environ.get('GOOGLE_FORMS_URL', 'https://forms.gle/your_form_link')
 
 bot = telebot.TeleBot(TOKEN)
@@ -87,6 +87,10 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS masters
                  rating REAL,
                  reviews_count INTEGER,
                  status TEXT,
+                 entity_type TEXT DEFAULT 'individual',
+                 documents_verified INTEGER DEFAULT 0,
+                 photos_verified INTEGER DEFAULT 0,
+                 reviews_verified INTEGER DEFAULT 0,
                  created_at TEXT)''')
 
 # Таблица анкет мастеров (на проверку)
@@ -103,10 +107,24 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS master_applications
                  experience TEXT,
                  portfolio TEXT,
                  documents TEXT,
+                 entity_type TEXT DEFAULT 'individual',
                  status TEXT,
                  created_at TEXT)''')
 
-# Добавляем недостающие колонки, если их нет
+# Таблица рекомендаций (предложенные мастера)
+cursor.execute('''CREATE TABLE IF NOT EXISTS recommendations
+                (id INTEGER PRIMARY KEY,
+                 user_id INTEGER,
+                 username TEXT,
+                 master_name TEXT,
+                 service TEXT,
+                 contact TEXT,
+                 description TEXT,
+                 portfolio TEXT,
+                 status TEXT,
+                 created_at TEXT)''')
+
+# Добавляем недостающие колонки в старые таблицы
 try:
     cursor.execute('ALTER TABLE requests ADD COLUMN description TEXT')
 except:
@@ -167,7 +185,8 @@ def add_master_to_google_sheet(master_data):
             str(master_data.get('rating', '4.8')),
             str(master_data.get('reviews_count', '0')),
             str(master_data.get('status', 'На проверке')),
-            str(master_data.get('telegram_id', ''))
+            str(master_data.get('telegram_id', '')),
+            str(master_data.get('entity_type', 'individual'))  # колонка P – Тип
         ]
         sheet.append_row(row)
         print(f"✅ Мастер {master_data.get('name')} добавлен в Google Sheets")
@@ -238,7 +257,8 @@ def test_sheet(message):
             "5.0",
             "1",
             "Тест",
-            "12345"
+            "12345",
+            "individual"  # Тип
         ]
         sheet.append_row(test_row)
         lines.append("✅ Тестовая запись выполнена!")
@@ -293,28 +313,32 @@ def start(message):
             "👉 @remont_vl25_final_bot\n\n"
             "Там вы можете:\n"
             "✅ Оставить заявку на ремонт\n"
-            "✅ Найти проверенного мастера\n"
+            "✅ Найти проверенного мастера (каталог с рейтингом и статусом)\n"
             "✅ Стать мастером и добавить анкету\n"
             "✅ Оставить отзыв о работе\n"
-            "✅ Проверить статус анкеты",
+            "✅ Проверить статус анкеты\n"
+            "✅ Рекомендовать мастера",
             reply_markup=markup
         )
         return
 
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.row('🔨 Оставить заявку', '⭐ Оставить отзыв')
-    markup.row('🔍 Найти мастера', '📞 Контакты')
+    markup.row('🔍 Найти мастера', '👍 Рекомендовать мастера')
     markup.row('📢 Канал с мастерами', '👷 Стать мастером')
     markup.row('📋 Анкета (Google Forms)')
 
     bot.send_message(
         message.chat.id,
-        "👋 Добро пожаловать в бот заявок на ремонт!\n\n"
-        "🔹 Хотите найти мастера? Нажмите «Оставить заявку»\n"
-        "🔹 Хотите поблагодарить мастера? Нажмите «Оставить отзыв»\n"
-        "🔹 Хотите добавить свою анкету? Нажмите «Стать мастером» (в боте) или «📋 Анкета (Google Forms)»\n\n"
-        f"💬 Чат-заявок: {CHAT_ID}\n"
-        f"📢 Канал с мастерами: {CHANNEL_LINK}",
+        "👋 **Добро пожаловать в бот заявок на ремонт!**\n\n"
+        "🔹 **Хотите найти мастера?**\n"
+        "   • Нажмите «🔍 Найти мастера» – выберите из каталога (рейтинг, цены, статус проверки)\n"
+        "   • Или оставьте заявку в чате @remontvl25chat – мастера сами откликнутся\n\n"
+        "🔹 **Хотите поблагодарить мастера?** Нажмите «⭐ Оставить отзыв»\n"
+        "🔹 **Хотите добавить свою анкету?** Нажмите «👷 Стать мастером» (в боте) или «📋 Анкета (Google Forms)»\n"
+        "🔹 **Знаете хорошего мастера?** Нажмите «👍 Рекомендовать мастера» – после проверки он попадёт в базу\n\n"
+        f"💬 **Чат-заявок:** {CHAT_ID}\n"
+        f"📢 **Канал с мастерами:** {CHANNEL_LINK}",
         reply_markup=markup
     )
 
@@ -330,12 +354,18 @@ def channel_link(message):
     ))
     bot.send_message(
         message.chat.id,
-        f"📢 Наш канал с проверенными мастерами: {CHANNEL_LINK}\n\n"
+        f"📢 **Наш канал с проверенными мастерами:** {CHANNEL_LINK}\n\n"
         "В канале вы найдете:\n"
-        "✅ Карточки мастеров с отзывами\n"
+        "✅ Карточки мастеров с отзывами, рейтингом и статусом проверки\n"
         "✅ Реальные цены на ремонт\n"
         "✅ Фото работ до/после\n"
-        "✅ Черный список мошенников",
+        "✅ Черный список мошенников\n\n"
+        "🛡️ **Статусы мастеров:**\n"
+        "   • 👤 Частное лицо / 🏢 Компания\n"
+        "   • 📄 Документы проверены\n"
+        "   • 📸 Фото/видео подтверждены\n"
+        "   • 💬 Отзывы проверены\n"
+        "   • ✅ Верифицировано (полный пакет)",
         reply_markup=markup
     )
 
@@ -368,16 +398,16 @@ def request_service(message):
         return
     msg = bot.send_message(
         message.chat.id,
-        "🔨 СОЗДАНИЕ ЗАЯВКИ\n\n"
+        "🔨 **СОЗДАНИЕ ЗАЯВКИ**\n\n"
         "Шаг 1 из 5\n"
-        "👇 ВЫБЕРИТЕ УСЛУГУ:\n\n"
+        "👇 **ВЫБЕРИТЕ УСЛУГУ:**\n\n"
         "Введите цифру или название:\n"
         "1 - Сантехник\n"
         "2 - Электрик\n"
         "3 - Отделочник\n"
         "4 - Строитель\n"
         "5 - Другое\n\n"
-        "👉 Пример: 1 или сантехник"
+        "👉 Пример: `1` или `сантехник`"
     )
     bot.register_next_step_handler(msg, process_service)
 
@@ -403,8 +433,8 @@ def process_service(message):
         service = text.capitalize()
     msg = bot.send_message(
         message.chat.id,
-        "📝 Шаг 2 из 5\n\n"
-        "👇 КРАТКО ОПИШИТЕ ЗАДАЧУ:\n\n"
+        "📝 **Шаг 2 из 5**\n\n"
+        "👇 **КРАТКО ОПИШИТЕ ЗАДАЧУ:**\n\n"
         "Например:\n"
         "• Заменить смеситель на кухне\n"
         "• Перенести 3 розетки в зале\n"
@@ -421,8 +451,8 @@ def process_description(message, service):
         return
     msg = bot.send_message(
         message.chat.id,
-        "📍 Шаг 3 из 5\n\n"
-        "👇 ВВЕДИТЕ РАЙОН ИЛИ ЖК:\n"
+        "📍 **Шаг 3 из 5**\n\n"
+        "👇 **ВВЕДИТЕ РАЙОН ИЛИ ЖК:**\n"
         "Например: Патрокл, Снеговая Падь, Варяг, Океан"
     )
     bot.register_next_step_handler(msg, process_district, service, description)
@@ -436,8 +466,8 @@ def process_district(message, service, description):
         return
     msg = bot.send_message(
         message.chat.id,
-        "📅 Шаг 4 из 5\n\n"
-        "👇 КОГДА НУЖНО ВЫПОЛНИТЬ РАБОТЫ?\n\n"
+        "📅 **Шаг 4 из 5**\n\n"
+        "👇 **КОГДА НУЖНО ВЫПОЛНИТЬ РАБОТЫ?**\n\n"
         "Например:\n"
         "• Сегодня вечером\n"
         "• Завтра с 10:00\n"
@@ -455,8 +485,8 @@ def process_date(message, service, description, district):
         return
     msg = bot.send_message(
         message.chat.id,
-        "💰 Шаг 5 из 5\n\n"
-        "👇 ВВЕДИТЕ БЮДЖЕТ:\n"
+        "💰 **Шаг 5 из 5**\n\n"
+        "👇 **ВВЕДИТЕ БЮДЖЕТ:**\n"
         "Например: до 3000₽, договорной, 50000₽ за квартиру"
     )
     bot.register_next_step_handler(msg, process_budget, service, description, district, date)
@@ -481,23 +511,23 @@ def process_budget(message, service, description, district, date):
 
     username = message.from_user.username or "Клиент"
     request_text = f"""
-🆕 НОВАЯ ЗАЯВКА!
+🆕 **НОВАЯ ЗАЯВКА!**
 
-👤 От: @{username}
-🔨 Услуга: {service}
-📝 Задача: {description}
-📍 Район/ЖК: {district}
-📅 Когда: {date}
-💰 Бюджет: {budget}
-⏰ Создано: {datetime.now().strftime("%H:%M %d.%m.%Y")}
+👤 **От:** @{username}
+🔨 **Услуга:** {service}
+📝 **Задача:** {description}
+📍 **Район/ЖК:** {district}
+📅 **Когда:** {date}
+💰 **Бюджет:** {budget}
+⏰ **Создано:** {datetime.now().strftime("%H:%M %d.%m.%Y")}
 
-👇 Мастера, откликайтесь в комментариях!
+👇 **Мастера, откликайтесь в комментариях!**
 """
     bot.send_message(CHAT_ID, request_text)
     bot.send_message(
         message.chat.id,
-        f"✅ ЗАЯВКА ОПУБЛИКОВАНА!\n\n"
-        f"💬 Чат с мастерами: {CHAT_ID}\n"
+        f"✅ **ЗАЯВКА ОПУБЛИКОВАНА!**\n\n"
+        f"💬 **Чат с мастерами:** {CHAT_ID}\n"
         f"⏱ Ожидайте откликов в течение 5-10 минут.\n\n"
         f"📌 Если никто не ответил за 30 минут — создайте новую заявку."
     )
@@ -510,8 +540,8 @@ def add_review(message):
         return
     msg = bot.send_message(
         message.chat.id,
-        "⭐ ОСТАВИТЬ ОТЗЫВ\n\n"
-        "Напишите ИМЯ МАСТЕРА или НАЗВАНИЕ БРИГАДЫ:"
+        "⭐ **ОСТАВИТЬ ОТЗЫВ**\n\n"
+        "Напишите **ИМЯ МАСТЕРА** или **НАЗВАНИЕ БРИГАДЫ**:"
     )
     bot.register_next_step_handler(msg, process_review_master)
 
@@ -524,7 +554,7 @@ def process_review_master(message):
         return
     msg = bot.send_message(
         message.chat.id,
-        "📝 НАПИШИТЕ ТЕКСТ ОТЗЫВА:\n"
+        "📝 **НАПИШИТЕ ТЕКСТ ОТЗЫВА:**\n"
         "Например: Сделал быстро, качественно, цена адекватная"
     )
     bot.register_next_step_handler(msg, process_review_text, master)
@@ -559,9 +589,9 @@ def process_review_text(message, master):
 
     bot.send_message(
         message.chat.id,
-        f"👤 Мастер: {master}\n"
-        f"📝 Отзыв: {review_text}\n\n"
-        "⭐ ОЦЕНИТЕ РАБОТУ ОТ 1 ДО 5:",
+        f"👤 **Мастер:** {master}\n"
+        f"📝 **Отзыв:** {review_text}\n\n"
+        "⭐ **ОЦЕНИТЕ РАБОТУ ОТ 1 ДО 5:**",
         reply_markup=markup
     )
 
@@ -585,20 +615,23 @@ def rate_callback(call):
 
     master_name, user_name, review_text, rating, created_at = review
 
+    # Ищем мастера в базе проверенных
     extra_info = ""
-    cursor.execute('''SELECT service, phone FROM masters WHERE name LIKE ?''', (f'%{master_name}%',))
+    cursor.execute('''SELECT service, phone, entity_type FROM masters WHERE name LIKE ?''', (f'%{master_name}%',))
     master_data = cursor.fetchone()
     if master_data:
-        service, phone = master_data
-        extra_info = f"🔧 Специализация: {service}\n📞 Контакты: {phone[:10]}…"
+        service, phone, entity_type = master_data
+        type_icon = '🏢' if entity_type == 'company' else '👤'
+        type_label = 'Компания' if entity_type == 'company' else 'Частное лицо'
+        extra_info = f"{type_icon} {type_label}\n🔧 Специализация: {service}\n📞 Контакты: {phone[:10]}…"
 
     review_public = f"""
-⭐ НОВЫЙ ОТЗЫВ!
+⭐ **НОВЫЙ ОТЗЫВ!**
 
-👤 Мастер: {master_name}
-⭐ Оценка: {'⭐' * rating}
-📝 Отзыв: {review_text}
-👤 От кого: @{user_name}
+👤 **Мастер:** {master_name}
+⭐ **Оценка:** {'⭐' * rating}
+📝 **Отзыв:** {review_text}
+👤 **От кого:** @{user_name}
 {extra_info}
 ⏰ {created_at}
 """
@@ -606,10 +639,10 @@ def rate_callback(call):
 
     bot.answer_callback_query(call.id, f"Спасибо! Оценка {rating} ⭐ сохранена")
     bot.edit_message_text(
-        f"✅ СПАСИБО ЗА ОТЗЫВ!\n\n"
-        f"👤 Мастер: {master_name}\n"
-        f"⭐ Оценка: {'⭐' * rating}\n"
-        f"📝 Отзыв: {review_text}\n\n"
+        f"✅ **СПАСИБО ЗА ОТЗЫВ!**\n\n"
+        f"👤 **Мастер:** {master_name}\n"
+        f"⭐ **Оценка:** {'⭐' * rating}\n"
+        f"📝 **Отзыв:** {review_text}\n\n"
         f"Ваш отзыв опубликован в чате {CHAT_ID}",
         call.message.chat.id,
         call.message.message_id
@@ -633,7 +666,7 @@ def search_master(message):
         ))
         bot.send_message(
             message.chat.id,
-            "🔍 В базе пока нет мастеров.\n\n"
+            "🔍 **В базе пока нет мастеров.**\n\n"
             "Вы можете оставить заявку в чате – мастера сами откликнутся!",
             reply_markup=markup
         )
@@ -649,7 +682,15 @@ def search_master(message):
 
     bot.send_message(
         message.chat.id,
-        "🔍 **Каталог мастеров**\n\nВыберите специализацию:",
+        "🔍 **Каталог мастеров**\n\n"
+        "Выберите специализацию:\n\n"
+        "🛡️ *В карточках мастеров указаны:*\n"
+        "• 👤 Частное лицо / 🏢 Компания\n"
+        "• ⭐ Рейтинг и количество отзывов\n"
+        "• 📍 Районы работы\n"
+        "• 💰 Цены\n"
+        "• 📞 Контакт (после отклика)",
+        parse_mode='Markdown',
         reply_markup=markup
     )
 
@@ -683,7 +724,7 @@ def show_masters_page(message, user_id, service, page):
     offset = page * LIMIT
 
     cursor.execute('''
-        SELECT name, service, districts, price_min, price_max, rating, reviews_count, phone
+        SELECT name, service, districts, price_min, price_max, rating, reviews_count, phone, entity_type
         FROM masters
         WHERE service = ? AND status = 'активен'
         ORDER BY rating DESC, reviews_count DESC
@@ -708,11 +749,13 @@ def show_masters_page(message, user_id, service, page):
     text = f"🔍 **Мастера – {service}** (страница {page+1}/{total_pages})\n\n"
 
     for m in masters:
-        name, service, districts, price_min, price_max, rating, reviews, phone = m
+        name, service, districts, price_min, price_max, rating, reviews, phone, entity_type = m
         rating_stars = '⭐' * int(round(rating or 0)) + ('½' if rating and rating % 1 >= 0.5 else '')
         phone_display = phone[:10] + '…' if len(phone) > 10 else phone
+        type_icon = '🏢' if entity_type == 'company' else '👤'
+        type_label = 'Компания' if entity_type == 'company' else 'Частное лицо'
 
-        text += f"👤 **{name}**\n"
+        text += f"{type_icon} **{name}** ({type_label})\n"
         text += f"   📍 {districts}\n"
         text += f"   💰 {price_min} – {price_max}\n"
         text += f"   ⭐ {rating:.1f} ({reviews} отзывов)\n"
@@ -791,68 +834,21 @@ def back_to_services(call):
     )
     bot.answer_callback_query(call.id)
 
-# ================ КОНТАКТЫ (ТОЛЬКО В ЛС) ================
-@bot.message_handler(commands=['contacts'])
-@bot.message_handler(func=lambda message: message.text == '📞 Контакты')
-def contacts(message):
-    if not only_private(message):
-        return
-    markup = types.InlineKeyboardMarkup(row_width=1)
-    markup.add(
-        types.InlineKeyboardButton("📢 Канал с мастерами", url="https://t.me/remont_vl25"),
-        types.InlineKeyboardButton("💬 Чат-заявок", url="https://t.me/remontvl25chat"),
-        types.InlineKeyboardButton("👨‍💻 Администратор", url="https://t.me/remont_vl25")
-    )
-    bot.send_message(
-        message.chat.id,
-        f"📞 КОНТАКТЫ\n\n"
-        f"📢 Канал с мастерами: {CHANNEL_LINK}\n"
-        f"💬 Чат-заявок: {CHAT_ID}\n"
-        f"🤖 Этот бот: @remont_vl25_final_bot\n"
-        f"👨‍💻 Администратор: @remont_vl25\n\n"
-        f"📌 По вопросам сотрудничества и рекламы — пишите админу!",
-        reply_markup=markup
-    )
-
-# ================ ПОМОЩЬ (ТОЛЬКО В ЛС) ================
-@bot.message_handler(commands=['help'])
-def help_command(message):
-    if not only_private(message):
-        return
-    bot.send_message(
-        message.chat.id,
-        "❓ ПОМОЩЬ\n\n"
-        "Доступные команды:\n"
-        "/start - Запустить бота\n"
-        "/request - Оставить заявку\n"
-        "/review - Оставить отзыв\n"
-        "/search - Найти мастера (каталог)\n"
-        "/become_master - Стать мастером (анкета в боте)\n"
-        "/my_status - Статус анкеты\n"
-        "/contacts - Контакты\n"
-        "/help - Это сообщение\n\n"
-        "Как найти мастера?\n"
-        "1. Нажмите «🔍 Найти мастера» и выберите специализацию.\n"
-        "2. Или оставьте заявку в чате @remontvl25chat – мастера сами откликнутся."
-    )
-
-# ================ АНКЕТА МАСТЕРА (ТОЛЬКО В ЛС) ================
-@bot.message_handler(commands=['become_master'])
-@bot.message_handler(func=lambda message: message.text == '👷 Стать мастером')
-def become_master(message):
+# ================ РЕКОМЕНДАЦИЯ МАСТЕРА (ТОЛЬКО В ЛС) ================
+@bot.message_handler(commands=['recommend'])
+@bot.message_handler(func=lambda message: message.text == '👍 Рекомендовать мастера')
+def recommend_master(message):
     if not only_private(message):
         return
     msg = bot.send_message(
         message.chat.id,
-        "👷 ЗАПОЛНЕНИЕ АНКЕТЫ МАСТЕРА\n\n"
-        "Шаг 1 из 10\n"
-        "👇 ВВЕДИТЕ ВАШЕ ИМЯ ИЛИ НАЗВАНИЕ БРИГАДЫ:\n\n"
-        "Пример: Иван Петров\n"
-        "Или: Бригада «МастерОК»"
+        "👍 **РЕКОМЕНДАЦИЯ МАСТЕРА**\n\n"
+        "Шаг 1 из 5\n"
+        "👇 **ВВЕДИТЕ ИМЯ МАСТЕРА ИЛИ НАЗВАНИЕ БРИГАДЫ:**"
     )
-    bot.register_next_step_handler(msg, process_master_name)
+    bot.register_next_step_handler(msg, process_recommend_name)
 
-def process_master_name(message):
+def process_recommend_name(message):
     if message.chat.type != 'private':
         return
     name = safe_text(message)
@@ -861,8 +857,8 @@ def process_master_name(message):
         return
     msg = bot.send_message(
         message.chat.id,
-        "👷 Шаг 2 из 10\n\n"
-        "👇 ВЫБЕРИТЕ СПЕЦИАЛИЗАЦИЮ:\n\n"
+        "🔨 **Шаг 2 из 5**\n\n"
+        "👇 **ВЫБЕРИТЕ СПЕЦИАЛИЗАЦИЮ МАСТЕРА:**\n\n"
         "Введите цифру или название:\n"
         "1 - Сантехник\n"
         "2 - Электрик\n"
@@ -872,9 +868,9 @@ def process_master_name(message):
         "6 - Разнорабочий\n"
         "7 - Другое"
     )
-    bot.register_next_step_handler(msg, process_master_service, name)
+    bot.register_next_step_handler(msg, process_recommend_service, name)
 
-def process_master_service(message, name):
+def process_recommend_service(message, name):
     if message.chat.type != 'private':
         return
     text = safe_text(message)
@@ -898,131 +894,472 @@ def process_master_service(message, name):
         service = text.capitalize()
     msg = bot.send_message(
         message.chat.id,
-        "📞 Шаг 3 из 10\n\n"
-        "👇 ВВЕДИТЕ ВАШ ТЕЛЕФОН:\n\n"
+        "📞 **Шаг 3 из 5**\n\n"
+        "👇 **КОНТАКТ МАСТЕРА** (телефон / Telegram):\n\n"
+        "Укажите, как связаться с мастером.\n"
+        "Пример: +7 924 123-45-67 или @username"
+    )
+    bot.register_next_step_handler(msg, process_recommend_contact, name, service)
+
+def process_recommend_contact(message, name, service):
+    if message.chat.type != 'private':
+        return
+    contact = safe_text(message)
+    if not contact:
+        bot.send_message(message.chat.id, "❌ Пожалуйста, укажите контакт.")
+        return
+    msg = bot.send_message(
+        message.chat.id,
+        "📝 **Шаг 4 из 5**\n\n"
+        "👇 **ОПИШИТЕ, ПОЧЕМУ ВЫ РЕКОМЕНДУЕТЕ ЭТОГО МАСТЕРА**\n\n"
+        "Например: делал ремонт в 2-комнатной, качественно, без доплат.\n"
+        "Это поможет при проверке."
+    )
+    bot.register_next_step_handler(msg, process_recommend_description, name, service, contact)
+
+def process_recommend_description(message, name, service, contact):
+    if message.chat.type != 'private':
+        return
+    description = safe_text(message)
+    if not description:
+        description = "Не указано"
+    msg = bot.send_message(
+        message.chat.id,
+        "📸 **Шаг 5 из 5**\n\n"
+        "👇 **ССЫЛКА НА ПОРТФОЛИО / ОТЗЫВЫ (ЕСЛИ ЕСТЬ)**\n\n"
+        "Можно указать ссылку на Яндекс.Диск, Google Фото или отзыв.\n"
+        "Или просто нажмите «Пропустить»"
+    )
+    bot.register_next_step_handler(msg, process_recommend_portfolio, name, service, contact, description)
+
+def process_recommend_portfolio(message, name, service, contact, description):
+    if message.chat.type != 'private':
+        return
+    portfolio = safe_text(message)
+    if not portfolio or portfolio.lower() == "пропустить":
+        portfolio = "Не указано"
+
+    cursor.execute('''INSERT INTO recommendations
+                    (user_id, username, master_name, service, contact, description, portfolio, status, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                    (message.from_user.id,
+                     message.from_user.username or "no_username",
+                     name, service, contact, description, portfolio,
+                     'на модерации',
+                     datetime.now().strftime("%d.%m.%Y %H:%M")))
+    conn.commit()
+    rec_id = cursor.lastrowid
+
+    admin_msg = f"""
+👍 **НОВАЯ РЕКОМЕНДАЦИЯ МАСТЕРА!** (ID: {rec_id})
+
+👤 **Рекомендует:** @{message.from_user.username or "нет"}
+🛠 **Мастер:** {name}
+🔧 **Специализация:** {service}
+📞 **Контакт:** {contact}
+📝 **Описание:** {description}
+📸 **Портфолио:** {portfolio}
+
+✅ **Добавить на проверку:** /add_from_rec {rec_id}
+❌ **Отклонить:** /reject_rec {rec_id}
+    """
+    try:
+        if ADMIN_ID != 0:
+            bot.send_message(ADMIN_ID, admin_msg)
+    except:
+        pass
+
+    bot.send_message(
+        message.chat.id,
+        "✅ **СПАСИБО ЗА РЕКОМЕНДАЦИЮ!**\n\n"
+        "Мы проверим этого мастера и, если он подходит, добавим в базу.\n"
+        "Статус рекомендации можно узнать по команде /my_recommend_status"
+    )
+
+@bot.message_handler(commands=['my_recommend_status'])
+def my_recommend_status(message):
+    if not only_private(message):
+        return
+    cursor.execute('''SELECT master_name, status, created_at FROM recommendations 
+                    WHERE user_id = ? ORDER BY id DESC LIMIT 5''', (message.from_user.id,))
+    rows = cursor.fetchall()
+    if not rows:
+        bot.send_message(message.chat.id, "❌ У вас пока нет рекомендаций.")
+        return
+    text = "📋 **Ваши рекомендации:**\n\n"
+    for row in rows:
+        master, status, date = row
+        if status == 'на модерации':
+            status_emoji = '⏳'
+        elif status == 'одобрено':
+            status_emoji = '✅'
+        elif status == 'отклонено':
+            status_emoji = '❌'
+        else:
+            status_emoji = '📌'
+        text += f"{status_emoji} {master} – {status} ({date})\n"
+    bot.send_message(message.chat.id, text)
+
+# ================ АДМИН-КОМАНДЫ ДЛЯ РЕКОМЕНДАЦИЙ ================
+@bot.message_handler(commands=['add_from_rec'])
+def add_from_recommendation(message):
+    if message.from_user.id != ADMIN_ID:
+        bot.reply_to(message, "❌ У вас нет прав.")
+        return
+    try:
+        parts = message.text.split()
+        if len(parts) < 2:
+            bot.reply_to(message, "❌ Используйте: /add_from_rec [ID рекомендации]")
+            return
+        rec_id = int(parts[1])
+
+        cursor.execute('SELECT * FROM recommendations WHERE id = ?', (rec_id,))
+        rec = cursor.fetchone()
+        if not rec:
+            bot.reply_to(message, f"❌ Рекомендация с ID {rec_id} не найдена.")
+            return
+
+        # Создаём анкету мастера на проверку
+        cursor.execute('''INSERT INTO master_applications
+                        (user_id, username, name, service, phone, districts, price_min, price_max,
+                         experience, portfolio, documents, entity_type, status, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                        (rec[1],  # user_id
+                         rec[2],  # username
+                         rec[3],  # master_name
+                         rec[4],  # service
+                         rec[5],  # contact (будет как телефон)
+                         'Не указано',  # districts
+                         'Не указано',  # price_min
+                         'Не указано',  # price_max
+                         'Не указано',  # experience
+                         rec[7],  # portfolio
+                         'Рекомендация',  # documents
+                         'individual',  # entity_type (по умолчанию частное лицо)
+                         'На проверке (рекомендован)',
+                         datetime.now().strftime("%d.%m.%Y %H:%M")))
+        conn.commit()
+
+        cursor.execute('''UPDATE recommendations SET status = 'одобрено' WHERE id = ?''', (rec_id,))
+        conn.commit()
+
+        bot.reply_to(message, f"✅ Мастер {rec[3]} добавлен на проверку (анкета создана).")
+    except Exception as e:
+        bot.reply_to(message, f"❌ Ошибка: {e}")
+
+@bot.message_handler(commands=['reject_rec'])
+def reject_recommendation(message):
+    if message.from_user.id != ADMIN_ID:
+        bot.reply_to(message, "❌ У вас нет прав.")
+        return
+    try:
+        parts = message.text.split()
+        if len(parts) < 2:
+            bot.reply_to(message, "❌ Используйте: /reject_rec [ID рекомендации]")
+            return
+        rec_id = int(parts[1])
+        cursor.execute('''UPDATE recommendations SET status = 'отклонено' WHERE id = ?''', (rec_id,))
+        conn.commit()
+        bot.reply_to(message, f"❌ Рекомендация {rec_id} отклонена.")
+    except Exception as e:
+        bot.reply_to(message, f"❌ Ошибка: {e}")
+
+# ================ КОНТАКТЫ (ТОЛЬКО В ЛС) ================
+@bot.message_handler(commands=['contacts'])
+@bot.message_handler(func=lambda message: message.text == '📞 Контакты')
+def contacts(message):
+    if not only_private(message):
+        return
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(
+        types.InlineKeyboardButton("📢 Канал с мастерами", url="https://t.me/remont_vl25"),
+        types.InlineKeyboardButton("💬 Чат-заявок", url="https://t.me/remontvl25chat"),
+        types.InlineKeyboardButton("👨‍💻 Администратор", url="https://t.me/remont_vl25")
+    )
+    bot.send_message(
+        message.chat.id,
+        f"📞 **КОНТАКТЫ**\n\n"
+        f"📢 **Канал с мастерами:** {CHANNEL_LINK}\n"
+        f"💬 **Чат-заявок:** {CHAT_ID}\n"
+        f"🤖 **Этот бот:** @remont_vl25_final_bot\n"
+        f"👨‍💻 **Администратор:** @remont_vl25\n\n"
+        f"📌 По вопросам сотрудничества и рекламы — пишите админу!",
+        reply_markup=markup
+    )
+
+# ================ ПОМОЩЬ (ТОЛЬКО В ЛС) ================
+@bot.message_handler(commands=['help'])
+def help_command(message):
+    if not only_private(message):
+        return
+    bot.send_message(
+        message.chat.id,
+        "❓ **ПОМОЩЬ**\n\n"
+        "**Доступные команды:**\n"
+        "/start - Запустить бота\n"
+        "/request - Оставить заявку\n"
+        "/review - Оставить отзыв\n"
+        "/search - Найти мастера (каталог)\n"
+        "/recommend - Рекомендовать мастера\n"
+        "/become_master - Стать мастером (анкета в боте)\n"
+        "/my_status - Статус анкеты\n"
+        "/my_recommend_status - Статус рекомендаций\n"
+        "/contacts - Контакты\n"
+        "/help - Это сообщение\n\n"
+        "**Как найти мастера?**\n"
+        "1️⃣ **Самостоятельный выбор** – нажмите «🔍 Найти мастера», выберите специализацию, сравните рейтинг и цены.\n"
+        "2️⃣ **Заявка в чате** – напишите в @remontvl25chat: «Ищу [услуга], [район], [бюджет]». Мастера откликнутся.\n\n"
+        "**Как стать мастером?**\n"
+        "• Заполните анкету в боте («👷 Стать мастером») или через Google Forms («📋 Анкета (Google Forms)»).\n"
+        "• После проверки администратора ваша карточка появится в канале и каталоге.\n\n"
+        "**Как рекомендовать мастера?**\n"
+        "• Нажмите «👍 Рекомендовать мастера» и укажите данные.\n"
+        "• После проверки мастер будет добавлен в базу."
+    )
+
+# ================ АНКЕТА МАСТЕРА (ТОЛЬКО В ЛС) ================
+# Хранилище данных анкеты (временное)
+if not hasattr(bot, 'master_data'):
+    bot.master_data = {}
+
+@bot.message_handler(commands=['become_master'])
+@bot.message_handler(func=lambda message: message.text == '👷 Стать мастером')
+def become_master(message):
+    if not only_private(message):
+        return
+    
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("👤 Частное лицо", callback_data="entity_individual"),
+        types.InlineKeyboardButton("🏢 Компания / ИП", callback_data="entity_company")
+    )
+    
+    bot.send_message(
+        message.chat.id,
+        "👷 **ЗАПОЛНЕНИЕ АНКЕТЫ МАСТЕРА**\n\n"
+        "Шаг 1 из 11\n"
+        "👇 **ВЫБЕРИТЕ ТИП:**",
+        reply_markup=markup
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('entity_'))
+def entity_callback(call):
+    entity_type = call.data.split('_')[1]  # individual или company
+    bot.master_data[call.from_user.id] = {'entity_type': entity_type}
+    
+    if entity_type == 'individual':
+        question = "👤 **ВВЕДИТЕ ВАШЕ ИМЯ:**"
+    else:
+        question = "🏢 **ВВЕДИТЕ НАЗВАНИЕ КОМПАНИИ ИЛИ БРИГАДЫ:**"
+    
+    bot.edit_message_text(
+        f"👷 **ЗАПОЛНЕНИЕ АНКЕТЫ МАСТЕРА**\n\n"
+        f"Шаг 2 из 11\n"
+        f"👇 {question}",
+        call.message.chat.id,
+        call.message.message_id
+    )
+    bot.register_next_step_handler(call.message, process_master_name, entity_type)
+    bot.answer_callback_query(call.id)
+
+def process_master_name(message, entity_type):
+    if message.chat.type != 'private':
+        return
+    name = safe_text(message)
+    if not name:
+        bot.send_message(message.chat.id, "❌ Пожалуйста, введите имя/название.")
+        return
+    
+    bot.master_data[message.from_user.id]['name'] = name
+    bot.master_data[message.from_user.id]['entity_type'] = entity_type
+    
+    msg = bot.send_message(
+        message.chat.id,
+        "👷 **Шаг 3 из 11**\n\n"
+        "👇 **ВЫБЕРИТЕ СПЕЦИАЛИЗАЦИЮ:**\n\n"
+        "Введите цифру или название:\n"
+        "1 - Сантехник\n"
+        "2 - Электрик\n"
+        "3 - Отделочник\n"
+        "4 - Строитель\n"
+        "5 - Сварщик\n"
+        "6 - Разнорабочий\n"
+        "7 - Другое"
+    )
+    bot.register_next_step_handler(msg, process_master_service, name, entity_type)
+
+def process_master_service(message, name, entity_type):
+    if message.chat.type != 'private':
+        return
+    text = safe_text(message)
+    if not text:
+        bot.send_message(message.chat.id, "❌ Пожалуйста, выберите специализацию.")
+        return
+    service_input = text.lower()
+    if service_input == "1" or "сантехник" in service_input:
+        service = "Сантехник"
+    elif service_input == "2" or "электрик" in service_input:
+        service = "Электрик"
+    elif service_input == "3" or "отделочник" in service_input:
+        service = "Отделочник"
+    elif service_input == "4" or "строитель" in service_input:
+        service = "Строитель"
+    elif service_input == "5" or "сварщик" in service_input:
+        service = "Сварщик"
+    elif service_input == "6" or "разнорабочий" in service_input:
+        service = "Разнорабочий"
+    else:
+        service = text.capitalize()
+    
+    bot.master_data[message.from_user.id]['service'] = service
+    
+    msg = bot.send_message(
+        message.chat.id,
+        "📞 **Шаг 4 из 11**\n\n"
+        "👇 **ВВЕДИТЕ ВАШ ТЕЛЕФОН:**\n\n"
         "Пример: +7 924 123-45-67\n\n"
         "⚠️ Номер будет виден ТОЛЬКО администратору"
     )
-    bot.register_next_step_handler(msg, process_master_phone, name, service)
+    bot.register_next_step_handler(msg, process_master_phone, name, service, entity_type)
 
-def process_master_phone(message, name, service):
+def process_master_phone(message, name, service, entity_type):
     if message.chat.type != 'private':
         return
     phone = safe_text(message)
     if not phone:
         bot.send_message(message.chat.id, "❌ Пожалуйста, введите телефон.")
         return
+    
+    bot.master_data[message.from_user.id]['phone'] = phone
+    
     msg = bot.send_message(
         message.chat.id,
-        "📍 Шаг 4 из 10\n\n"
-        "👇 В КАКИХ РАЙОНАХ/ЖК ВЫ РАБОТАЕТЕ?\n\n"
+        "📍 **Шаг 5 из 11**\n\n"
+        "👇 **В КАКИХ РАЙОНАХ/ЖК ВЫ РАБОТАЕТЕ?**\n\n"
         "Перечислите через запятую:\n"
         "Пример: Патрокл, Снеговая Падь, Варяг, Океан"
     )
-    bot.register_next_step_handler(msg, process_master_districts, name, service, phone)
+    bot.register_next_step_handler(msg, process_master_districts, name, service, phone, entity_type)
 
-def process_master_districts(message, name, service, phone):
+def process_master_districts(message, name, service, phone, entity_type):
     if message.chat.type != 'private':
         return
     districts = safe_text(message)
     if not districts:
         bot.send_message(message.chat.id, "❌ Пожалуйста, укажите районы.")
         return
+    
+    bot.master_data[message.from_user.id]['districts'] = districts
+    
     msg = bot.send_message(
         message.chat.id,
-        "💰 Шаг 5 из 10\n\n"
-        "👇 МИНИМАЛЬНАЯ ЦЕНА ЗАКАЗА:\n\n"
+        "💰 **Шаг 6 из 11**\n\n"
+        "👇 **МИНИМАЛЬНАЯ ЦЕНА ЗАКАЗА:**\n\n"
         "Пример: 1000₽, 5000₽, договорная"
     )
-    bot.register_next_step_handler(msg, process_master_price_min, name, service, phone, districts)
+    bot.register_next_step_handler(msg, process_master_price_min, name, service, phone, districts, entity_type)
 
-def process_master_price_min(message, name, service, phone, districts):
+def process_master_price_min(message, name, service, phone, districts, entity_type):
     if message.chat.type != 'private':
         return
     price_min = safe_text(message)
     if not price_min:
         bot.send_message(message.chat.id, "❌ Пожалуйста, укажите минимальную цену.")
         return
+    
+    bot.master_data[message.from_user.id]['price_min'] = price_min
+    
     msg = bot.send_message(
         message.chat.id,
-        "💰 Шаг 6 из 10\n\n"
-        "👇 МАКСИМАЛЬНАЯ ЦЕНА ЗАКАЗА:\n\n"
+        "💰 **Шаг 7 из 11**\n\n"
+        "👇 **МАКСИМАЛЬНАЯ ЦЕНА ЗАКАЗА:**\n\n"
         "Пример: 50000₽, 100000₽, договорная"
     )
-    bot.register_next_step_handler(msg, process_master_price_max, name, service, phone, districts, price_min)
+    bot.register_next_step_handler(msg, process_master_price_max, name, service, phone, districts, price_min, entity_type)
 
-def process_master_price_max(message, name, service, phone, districts, price_min):
+def process_master_price_max(message, name, service, phone, districts, price_min, entity_type):
     if message.chat.type != 'private':
         return
     price_max = safe_text(message)
     if not price_max:
         bot.send_message(message.chat.id, "❌ Пожалуйста, укажите максимальную цену.")
         return
+    
+    bot.master_data[message.from_user.id]['price_max'] = price_max
+    
     msg = bot.send_message(
         message.chat.id,
-        "⏱️ Шаг 7 из 10\n\n"
-        "👇 ВАШ ОПЫТ РАБОТЫ:\n\n"
+        "⏱️ **Шаг 8 из 11**\n\n"
+        "👇 **ВАШ ОПЫТ РАБОТЫ:**\n\n"
         "Пример: 3 года, 5 лет, 10+ лет"
     )
-    bot.register_next_step_handler(msg, process_master_experience, name, service, phone, districts, price_min, price_max)
+    bot.register_next_step_handler(msg, process_master_experience, name, service, phone, districts, price_min, price_max, entity_type)
 
-def process_master_experience(message, name, service, phone, districts, price_min, price_max):
+def process_master_experience(message, name, service, phone, districts, price_min, price_max, entity_type):
     if message.chat.type != 'private':
         return
     experience = safe_text(message)
     if not experience:
         bot.send_message(message.chat.id, "❌ Пожалуйста, укажите опыт работы.")
         return
+    
+    bot.master_data[message.from_user.id]['experience'] = experience
+    
     msg = bot.send_message(
         message.chat.id,
-        "📸 Шаг 8 из 10\n\n"
-        "👇 ОТПРАВЬТЕ ССЫЛКУ НА ПОРТФОЛИО:\n\n"
+        "📸 **Шаг 9 из 11**\n\n"
+        "👇 **ОТПРАВЬТЕ ССЫЛКУ НА ПОРТФОЛИО:**\n\n"
         "Это может быть:\n"
         "• Ссылка на Яндекс.Диск с фото\n"
         "• Ссылка на Google Фото\n"
         "• Telegram-канал с работами\n\n"
         "Или просто нажмите 'Пропустить'"
     )
-    bot.register_next_step_handler(msg, process_master_portfolio, name, service, phone, districts, price_min, price_max, experience)
+    bot.register_next_step_handler(msg, process_master_portfolio, name, service, phone, districts, price_min, price_max, experience, entity_type)
 
-def process_master_portfolio(message, name, service, phone, districts, price_min, price_max, experience):
+def process_master_portfolio(message, name, service, phone, districts, price_min, price_max, experience, entity_type):
     if message.chat.type != 'private':
         return
     portfolio = safe_text(message)
     if not portfolio or portfolio.lower() == "пропустить":
         portfolio = "Не указано"
+    
+    bot.master_data[message.from_user.id]['portfolio'] = portfolio
+    
     msg = bot.send_message(
         message.chat.id,
-        "📄 Шаг 9 из 10\n\n"
-        "👇 ПОДТВЕРЖДАЮЩИЕ ДОКУМЕНТЫ:\n\n"
+        "📄 **Шаг 10 из 11**\n\n"
+        "👇 **ПОДТВЕРЖДАЮЩИЕ ДОКУМЕНТЫ:**\n\n"
         "Есть ли у вас:\n"
         "• Самозанятость/ИП\n"
         "• Паспорт (личная встреча)\n"
         "• Договор подряда\n\n"
         "Напишите: Есть / Нет / Пропустить"
     )
-    bot.register_next_step_handler(msg, process_master_documents, name, service, phone, districts, price_min, price_max, experience, portfolio)
+    bot.register_next_step_handler(msg, process_master_documents, name, service, phone, districts, price_min, price_max, experience, portfolio, entity_type)
 
-def process_master_documents(message, name, service, phone, districts, price_min, price_max, experience, portfolio):
+def process_master_documents(message, name, service, phone, districts, price_min, price_max, experience, portfolio, entity_type):
     if message.chat.type != 'private':
         return
     documents = safe_text(message)
     if not documents:
         documents = "Не указано"
-
+    
     cursor.execute('''INSERT INTO master_applications
                     (user_id, username, name, service, phone, districts, 
-                     price_min, price_max, experience, portfolio, documents, status, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                     price_min, price_max, experience, portfolio, documents, 
+                     entity_type, status, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                     (message.from_user.id,
                      message.from_user.username or "no_username",
                      name, service, phone, districts,
                      price_min, price_max, experience, portfolio, documents,
+                     entity_type,
                      'На проверке',
                      datetime.now().strftime("%d.%m.%Y %H:%M")))
     conn.commit()
     application_id = cursor.lastrowid
-
+    
     master_data = {
         'id': application_id,
         'date': datetime.now().strftime("%d.%m.%Y"),
@@ -1038,24 +1375,27 @@ def process_master_documents(message, name, service, phone, districts, price_min
         'rating': '4.8',
         'reviews_count': '0',
         'status': 'На проверке',
-        'telegram_id': message.from_user.id
+        'telegram_id': message.from_user.id,
+        'entity_type': entity_type
     }
     add_master_to_google_sheet(master_data)
-
+    
+    entity_display = "👤 Частное лицо" if entity_type == 'individual' else "🏢 Компания/ИП"
     admin_msg = f"""
-🆕 НОВАЯ АНКЕТА МАСТЕРА! (ID: {application_id})
+🆕 **НОВАЯ АНКЕТА МАСТЕРА!** (ID: {application_id})
 
-👤 Имя: {name}
-🔨 Специализация: {service}
-📞 Телефон: {phone}
-📍 Районы: {districts}
-💰 Цены: {price_min} - {price_max}
-⏱️ Опыт: {experience}
-📸 Портфолио: {portfolio}
-📄 Документы: {documents}
-👤 Telegram: @{message.from_user.username or "нет"}
-🆔 ID: {message.from_user.id}
-Статус: ⏳ На проверке
+{entity_display}
+👤 **Имя/Название:** {name}
+🔨 **Специализация:** {service}
+📞 **Телефон:** {phone}
+📍 **Районы:** {districts}
+💰 **Цены:** {price_min} - {price_max}
+⏱️ **Опыт:** {experience}
+📸 **Портфолио:** {portfolio}
+📄 **Документы:** {documents}
+👤 **Telegram:** @{message.from_user.username or "нет"}
+🆔 **ID:** {message.from_user.id}
+**Статус:** ⏳ На проверке
 
 ✅ Одобрить: /approve {application_id}
 ❌ Отклонить: /reject {application_id} [причина]
@@ -1065,12 +1405,12 @@ def process_master_documents(message, name, service, phone, districts, price_min
             bot.send_message(ADMIN_ID, admin_msg)
     except:
         pass
-
+    
     bot.send_message(
         message.chat.id,
-        "✅ ВАША АНКЕТА ОТПРАВЛЕНА!\n\n"
+        "✅ **ВАША АНКЕТА ОТПРАВЛЕНА!**\n\n"
         "Спасибо за доверие!\n\n"
-        "📌 Что дальше?\n"
+        "📌 **Что дальше?**\n"
         "1. Администратор проверит анкету (обычно 1-2 дня)\n"
         "2. Мы можем запросить фото работ или отзывы\n"
         "3. После проверки ваша карточка появится в канале\n\n"
@@ -1088,15 +1428,15 @@ def my_status(message):
     if row:
         status, date = row
         if status == "На проверке":
-            text = "⏳ Статус: На проверке\n\nВаша анкета ещё проверяется администратором. Обычно это занимает 1-2 дня."
+            text = "⏳ **Статус:** На проверке\n\nВаша анкета ещё проверяется администратором. Обычно это занимает 1-2 дня."
         elif status == "Одобрена":
-            text = "✅ Статус: Одобрена!\n\nПоздравляем! Ваша карточка скоро появится в канале."
+            text = "✅ **Статус:** Одобрена!\n\nПоздравляем! Ваша карточка скоро появится в канале."
         elif status == "Отклонена":
-            text = "❌ Статус: Отклонена\n\nК сожалению, ваша анкета не прошла проверку. Свяжитесь с администратором для уточнения причин."
+            text = "❌ **Статус:** Отклонена\n\nК сожалению, ваша анкета не прошла проверку. Свяжитесь с администратором для уточнения причин."
         else:
-            text = f"📌 Статус: {status}"
+            text = f"📌 **Статус:** {status}"
     else:
-        text = "❌ У вас нет активных анкет\n\nЧтобы подать заявку, нажмите «👷 Стать мастером»"
+        text = "❌ У вас нет активных анкет.\n\nЧтобы подать заявку, нажмите «👷 Стать мастером»"
     bot.send_message(message.chat.id, text)
 
 # ================ КОМАНДЫ АДМИНИСТРАТОРА ================
@@ -1117,15 +1457,19 @@ def approve_master(message):
             bot.reply_to(message, f"❌ Анкета с ID {application_id} не найдена.")
             return
 
+        # Обновляем статус анкеты
         cursor.execute('''UPDATE master_applications SET status = 'Одобрена' WHERE id = ?''', (application_id,))
+        
+        # Добавляем мастера в таблицу проверенных с копированием entity_type
         cursor.execute('''INSERT INTO masters
                         (name, service, phone, districts, price_min, price_max, 
-                         experience, portfolio, rating, reviews_count, status, created_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                         experience, portfolio, rating, reviews_count, status, created_at, entity_type)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                         (app[3], app[4], app[5], app[6],
                          app[7], app[8], app[9], app[10],
                          4.8, 0, 'активен',
-                         datetime.now().strftime("%d.%m.%Y %H:%M")))
+                         datetime.now().strftime("%d.%m.%Y %H:%M"),
+                         app[12]))  # app[12] – entity_type
         conn.commit()
 
         update_master_status_in_google_sheet(app[1], 'Одобрена')
@@ -1133,10 +1477,10 @@ def approve_master(message):
         try:
             bot.send_message(
                 app[1],
-                f"✅ ВАША АНКЕТА ОДОБРЕНА!\n\n"
+                f"✅ **ВАША АНКЕТА ОДОБРЕНА!**\n\n"
                 f"Поздравляем! Теперь вы в базе проверенных мастеров.\n"
                 f"Ваша карточка будет опубликована в канале {CHANNEL_LINK}\n\n"
-                f"📌 Что дальше?\n"
+                f"📌 **Что дальше?**\n"
                 f"1. Мы подготовим вашу карточку\n"
                 f"2. Вы получите заявки из чата\n"
                 f"3. Клиенты смогут оставлять отзывы"
@@ -1176,8 +1520,8 @@ def reject_master(message):
         try:
             bot.send_message(
                 app[1],
-                f"❌ ВАША АНКЕТА ОТКЛОНЕНА\n\n"
-                f"Причина: {reason}\n\n"
+                f"❌ **ВАША АНКЕТА ОТКЛОНЕНА**\n\n"
+                f"**Причина:** {reason}\n\n"
                 f"Свяжитесь с администратором: @remont_vl25\n\n"
                 f"Вы можете подать заявку снова после исправления замечаний."
             )
@@ -1220,13 +1564,13 @@ def stop_other_instances():
         pass
 
 if __name__ == '__main__':
-    print("=" * 50)
+    print("=" * 60)
     print("✅ Бот запускается...")
     print(f"🤖 Токен: {TOKEN[:10]}...")
     print(f"💬 Чат: {CHAT_ID}")
     print(f"📢 Канал: {CHANNEL_LINK}")
     print(f"👑 Админ ID: {ADMIN_ID}")
-    print("=" * 50)
+    print("=" * 60)
 
     reset_webhook()
     stop_other_instances()
