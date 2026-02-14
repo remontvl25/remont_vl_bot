@@ -4086,8 +4086,222 @@ def rate_callback(call):
     )
 
 # ================ РЕКОМЕНДАЦИЯ МАСТЕРА (расширенная) ================
-# (здесь должен быть код из предыдущей версии, он не менялся принципиально)
-# Для краткости оставлю заглушку, но в реальности нужно скопировать полный блок
+if not hasattr(bot, 'recommend_data'):
+    bot.recommend_data = {}
+
+@bot.message_handler(commands=['recommend'])
+@bot.message_handler(func=lambda message: message.text == '👍 Рекомендовать мастера')
+def recommend_master(message):
+    if not only_private(message):
+        return
+    msg = bot.send_message(
+        message.chat.id,
+        "👍 **РЕКОМЕНДАЦИЯ МАСТЕРА**\n\n"
+        "Шаг 1 из 7\n"
+        "👇 **ВВЕДИТЕ ИМЯ МАСТЕРА ИЛИ НАЗВАНИЕ БРИГАДЫ:**"
+    )
+    bot.register_next_step_handler(msg, process_recommend_name)
+
+def process_recommend_name(message):
+    if message.chat.type != 'private':
+        return
+    name = safe_text(message)
+    if not name:
+        bot.send_message(message.chat.id, "❌ Пожалуйста, введите имя.")
+        return
+    user_id = message.from_user.id
+    bot.recommend_data[user_id] = {'master_name': name}
+
+    msg = bot.send_message(
+        message.chat.id,
+        "🔨 **Шаг 2 из 7**\n\n"
+        "👇 **ВЫБЕРИТЕ СПЕЦИАЛИЗАЦИЮ МАСТЕРА:**\n\n"
+        "Введите цифру или название:\n"
+        "1 - Сантехник\n"
+        "2 - Электрик\n"
+        "3 - Отделочник\n"
+        "4 - Строитель\n"
+        "5 - Сварщик\n"
+        "6 - Разнорабочий\n"
+        "7 - Другое"
+    )
+    bot.register_next_step_handler(msg, process_recommend_service, name)
+
+def process_recommend_service(message, name):
+    if message.chat.type != 'private':
+        return
+    text = safe_text(message)
+    if not text:
+        bot.send_message(message.chat.id, "❌ Пожалуйста, выберите специализацию.")
+        return
+    service_input = text.lower()
+    if service_input == "1" or "сантехник" in service_input:
+        service = "Сантехник"
+    elif service_input == "2" or "электрик" in service_input:
+        service = "Электрик"
+    elif service_input == "3" or "отделочник" in service_input:
+        service = "Отделочник"
+    elif service_input == "4" or "строитель" in service_input:
+        service = "Строитель"
+    elif service_input == "5" or "сварщик" in service_input:
+        service = "Сварщик"
+    elif service_input == "6" or "разнорабочий" in service_input:
+        service = "Разнорабочий"
+    else:
+        service = text.capitalize()
+    user_id = message.from_user.id
+    bot.recommend_data[user_id]['service'] = service
+
+    msg = bot.send_message(
+        message.chat.id,
+        "📞 **Шаг 3 из 7**\n\n"
+        "👇 **КОНТАКТ МАСТЕРА** (телефон / Telegram):"
+    )
+    bot.register_next_step_handler(msg, process_recommend_contact, name, service)
+
+def process_recommend_contact(message, name, service):
+    if message.chat.type != 'private':
+        return
+    contact = safe_text(message)
+    if not contact:
+        bot.send_message(message.chat.id, "❌ Пожалуйста, укажите контакт.")
+        return
+    user_id = message.from_user.id
+    bot.recommend_data[user_id]['contact'] = contact
+
+    msg = bot.send_message(
+        message.chat.id,
+        "📝 **Шаг 4 из 7**\n\n"
+        "👇 **ОПИШИТЕ ВЫПОЛНЕННЫЕ РАБОТЫ:**\n\n"
+        "Например: замена смесителя, укладка плитки в ванной."
+    )
+    bot.register_next_step_handler(msg, process_recommend_description, name, service, contact)
+
+def process_recommend_description(message, name, service, contact):
+    if message.chat.type != 'private':
+        return
+    description = safe_text(message)
+    if not description:
+        description = "Не указано"
+    user_id = message.from_user.id
+    bot.recommend_data[user_id]['description'] = description
+
+    markup = types.InlineKeyboardMarkup(row_width=3)
+    markup.add(
+        types.InlineKeyboardButton("💸 Дорого", callback_data="price_expensive"),
+        types.InlineKeyboardButton("💰 Средне", callback_data="price_medium"),
+        types.InlineKeyboardButton("🪙 Дешево", callback_data="price_cheap")
+    )
+    bot.send_message(
+        message.chat.id,
+        "💰 **Шаг 5 из 7**\n\n"
+        "👇 **ОЦЕНИТЕ ЦЕНУ:**",
+        reply_markup=markup
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('price_'))
+def price_callback(call):
+    price_level = call.data.split('_')[1]
+    user_id = call.from_user.id
+    if not hasattr(bot, 'recommend_data') or user_id not in bot.recommend_data:
+        bot.answer_callback_query(call.id, "❌ Ошибка, начните заново.")
+        return
+    bot.recommend_data[user_id]['price_level'] = price_level
+    bot.edit_message_text(
+        "😊 **Шаг 6 из 7**\n\n"
+        "👇 **ВЫ ДОВОЛЬНЫ РАБОТОЙ?**",
+        call.message.chat.id,
+        call.message.message_id
+    )
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("✅ Доволен", callback_data="satisfied_yes"),
+        types.InlineKeyboardButton("❌ Не доволен", callback_data="satisfied_no")
+    )
+    bot.send_message(call.message.chat.id, "Выберите:", reply_markup=markup)
+    bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('satisfied_'))
+def satisfied_callback(call):
+    satisfaction = call.data.split('_')[1]
+    user_id = call.from_user.id
+    if not hasattr(bot, 'recommend_data') or user_id not in bot.recommend_data:
+        bot.answer_callback_query(call.id, "❌ Ошибка, начните заново.")
+        return
+    bot.recommend_data[user_id]['satisfaction'] = satisfaction
+    bot.edit_message_text(
+        "👍 **Шаг 7 из 7**\n\n"
+        "👇 **ВЫ РЕКОМЕНДУЕТЕ ЭТОГО МАСТЕРА?**",
+        call.message.chat.id,
+        call.message.message_id
+    )
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("✅ Да", callback_data="recommend_yes"),
+        types.InlineKeyboardButton("❌ Нет", callback_data="recommend_no")
+    )
+    bot.send_message(call.message.chat.id, "Выберите:", reply_markup=markup)
+    bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('recommend_'))
+def recommend_final_callback(call):
+    recommend = call.data.split('_')[1]
+    user_id = call.from_user.id
+    if not hasattr(bot, 'recommend_data') or user_id not in bot.recommend_data:
+        bot.answer_callback_query(call.id, "❌ Ошибка, начните заново.")
+        return
+    data = bot.recommend_data[user_id]
+    data['recommend'] = recommend
+
+    # Сохраняем в БД
+    cursor.execute('''INSERT INTO recommendations
+                    (user_id, username, master_name, service, contact, description,
+                     price_level, satisfaction, recommend, status, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                    (user_id,
+                     call.from_user.username or "no_username",
+                     data['master_name'],
+                     data['service'],
+                     data['contact'],
+                     data['description'],
+                     data['price_level'],
+                     data['satisfaction'],
+                     data['recommend'],
+                     'на модерации',
+                     datetime.now().strftime("%d.%m.%Y %H:%M")))
+    conn.commit()
+    rec_id = cursor.lastrowid
+
+    # Уведомление админу
+    admin_msg = f"""
+👍 **НОВАЯ РЕКОМЕНДАЦИЯ МАСТЕРА (РАСШИРЕННАЯ)!** (ID: {rec_id})
+
+👤 **Рекомендует:** @{call.from_user.username or "нет"}
+🛠 **Мастер:** {data['master_name']}
+🔧 **Специализация:** {data['service']}
+📞 **Контакт:** {data['contact']}
+📝 **Описание работ:** {data['description']}
+💰 **Цена:** {data['price_level']}
+😊 **Удовлетворён:** {data['satisfaction']}
+👍 **Рекомендует:** {data['recommend']}
+
+✅ **Добавить на проверку:** /add_from_rec {rec_id}
+❌ **Отклонить:** /reject_rec {rec_id}
+    """
+    try:
+        if ADMIN_ID != 0:
+            bot.send_message(ADMIN_ID, admin_msg)
+    except:
+        pass
+
+    bot.edit_message_text(
+        "✅ **СПАСИБО ЗА РЕКОМЕНДАЦИЮ!**\n\n"
+        "Администратор проверит данные и, если всё хорошо, добавит мастера в базу.",
+        call.message.chat.id,
+        call.message.message_id
+    )
+    del bot.recommend_data[user_id]
+    bot.answer_callback_query(call.id)
 
 # ================ ОБРАБОТЧИК НОВЫХ УЧАСТНИКОВ ЧАТА ================
 def is_new_member(chat_member_update):
