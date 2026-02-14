@@ -1631,26 +1631,60 @@ def process_budget(message, service, description, district, date):
     })
 
 def notify_masters_about_request(request_data):
+    """
+    Рассылает уведомление о новой заявке всем активным мастерам.
+    Если у мастера есть подписка, отправляет контакты клиента.
+    Если нет – уведомление без контактов и предложение подписаться.
+    """
     cursor.execute("SELECT user_id FROM masters WHERE status = 'активен' AND verification_type = 'full'")
     masters = cursor.fetchall()
     if not masters:
         return
-    text = f"""
+
+    # Извлекаем данные
+    service = request_data['service']
+    description = request_data['description']
+    district = request_data['district']
+    date = request_data['date']
+    budget = request_data['budget']
+    client_username = request_data.get('client_username')
+    client_user_id = request_data.get('client_user_id')
+
+    for master in masters:
+        master_id = master[0]
+        if has_premium(master_id):
+            # Есть подписка – отправляем с контактами
+            contact_info = f"👤 **Клиент:** @{client_username}" if client_username else f"👤 **Клиент:** ID {client_user_id}"
+            text = f"""
 📩 **Новая заявка по вашей специализации!**
 
-🔨 **Услуга:** {request_data['service']}
-📝 **Задача:** {request_data['description']}
-📍 **Район/ЖК:** {request_data['district']}
-📅 **Когда:** {request_data['date']}
-💰 **Бюджет:** {request_data['budget']}
+🔨 **Услуга:** {service}
+📝 **Задача:** {description}
+📍 **Район/ЖК:** {district}
+📅 **Когда:** {date}
+💰 **Бюджет:** {budget}
+{contact_info}
 
-💬 **Откликнуться:** напишите комментарий под заявкой в чате @remontvl25chat
-"""
-    for master in masters:
+💬 Свяжитесь с клиентом напрямую.
+            """
+        else:
+            # Нет подписки – уведомление без контактов + предложение
+            text = f"""
+📩 **Новая заявка по вашей специализации!**
+
+🔨 **Услуга:** {service}
+📝 **Задача:** {description}
+📍 **Район/ЖК:** {district}
+📅 **Когда:** {date}
+💰 **Бюджет:** {budget}
+
+🔒 **Контакты клиента скрыты.**  
+Чтобы получать контакты клиентов, оформите подписку: /subscribe
+            """
         try:
-            bot.send_message(master[0], text)
+            bot.send_message(master_id, text)
         except Exception as e:
-            print(f"❌ Не удалось отправить уведомление мастеру {master[0]}: {e}")
+            print(f"Не удалось отправить уведомление мастеру {master_id}: {e}")
 
 @bot.message_handler(func=lambda message: 
     message.chat.type != 'private' and 
