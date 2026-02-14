@@ -42,6 +42,72 @@ CHAT_ID = os.environ.get('CHAT_ID', "@remontvl25chat")
 CHANNEL_LINK = os.environ.get('CHANNEL_LINK', "@remont_vl25")
 ADMIN_ID = int(os.environ.get('ADMIN_ID', '0'))
 
+# Пороги для платных функций
+PAYMENT_THRESHOLD_MASTERS = int(os.environ.get('PAYMENT_THRESHOLD_MASTERS', 50))  # мастеров
+PAYMENT_THRESHOLD_SUBSCRIBERS = int(os.environ.get('PAYMENT_THRESHOLD_SUBSCRIBERS', 500))  # подписчиков канала
+
+def is_paid_mode_active():
+    """Возвращает True, если хотя бы один из порогов достигнут"""
+    cursor.execute("SELECT COUNT(*) FROM masters WHERE status = 'активен'")
+    masters_count = cursor.fetchone()[0]
+    # Для подписчиков канала нужен отдельный учёт (можно добавить в users, но проще пока считать мастеров)
+    # Для простоты будем использовать только количество мастеров.
+    return masters_count >= PAYMENT_THRESHOLD_MASTERS
+
+def become_master_full_verification(message):
+    if not is_paid_mode_active():
+        # Если порог не достигнут, всё бесплатно
+        # Запускаем обычный процесс полной верификации (без оплаты)
+        start_full_verification(message)
+        return
+    else:
+        # Если порог достигнут, предлагаем оплатить
+        bot.send_message(
+            message.chat.id,
+            "✅ Полная верификация теперь платная.\n"
+            "Её стоимость — 500 руб./месяц.\n"
+            "Оплатить можно по ссылке: [ссылка на оплату]\n"
+            "После оплаты ваш статус будет повышен."
+        )
+        # Здесь можно добавить кнопку "Оплатить" с callback, который откроет платёжную ссылку.
+@bot.message_handler(commands=['pay'])
+def pay(message):
+    bot.send_invoice(
+        message.chat.id,
+        title="Полная верификация на месяц",
+        description="Доступ к контактам клиентов и статус «Верифицирован»",
+        invoice_payload="verification_month",  # уникальный идентификатор
+        provider_token="",  # для звёзд оставляем пустым
+        currency="XTR",  # звёзды Telegram
+        prices=[types.LabeledPrice(label="Полная верификация", amount=5)],  # 5 звёзд (пример)
+        start_parameter="verification"
+    )
+
+@bot.pre_checkout_query_handler(func=lambda query: True)
+def pre_checkout_handler(pre_checkout_query):
+    bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
+
+@bot.message_handler(content_types=['successful_payment'])
+def successful_payment_handler(message):
+    # Здесь активируем платную функцию для пользователя
+    user_id = message.from_user.id
+    # Сохраняем в БД, что у пользователя есть премиум до такой-то даты
+    cursor.execute("INSERT INTO premium_users (user_id, expires_at) VALUES (?, datetime('now', '+1 month'))", (user_id,))
+    conn.commit()
+    bot.send_message(message.chat.id, "✅ Оплата прошла! Ваш статус повышен на месяц.")
+    
+cursor.execute('''CREATE TABLE IF NOT EXISTS premium_users
+                (user_id INTEGER PRIMARY KEY,
+                 expires_at TEXT,
+                 subscription_type TEXT)''')
+def has_premium(user_id):
+    cursor.execute('SELECT expires_at FROM premium_users WHERE user_id = ?', (user_id,))
+    row = cursor.fetchone()
+    if not row:
+        return False
+    expires = datetime.strptime(row[0], "%Y-%m-%d %H:%M:%S")
+    return expires > datetime.now()
+    
 GOOGLE_FORMS_BASE = os.environ.get('GOOGLE_FORMS_BASE', 'https://docs.google.com/forms/d/e/ВАШ_ID_ФОРМЫ/viewform')
 FORM_ENTRY_TG_ID = 'entry.1234567890'   # замените на реальные ID
 FORM_ENTRY_TG_USERNAME = 'entry.0987654321'
