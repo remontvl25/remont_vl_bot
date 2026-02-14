@@ -2152,7 +2152,8 @@ if __name__ == '__main__':
                 print("🔄 Обнаружен конфликт! Сброс...")
                 reset_webhook()
                 stop_other_instances()
-            time.sleep(5)import os
+            time.sleep(5)
+            import os
 import sys
 import json
 import time
