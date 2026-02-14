@@ -3854,6 +3854,122 @@ def handle_master_reply(message):
     except:
         pass
 
+def notify_masters_about_request(request_data):
+    """
+    Рассылает уведомление о новой заявке всем активным мастерам.
+    Если у мастера есть подписка, отправляет контакты клиента.
+    Если нет – уведомление без контактов и предложение подписаться.
+    """
+    cursor.execute("SELECT user_id FROM masters WHERE status = 'активен' AND verification_type = 'full'")
+    masters = cursor.fetchall()
+    if not masters:
+        return
+
+    # Извлекаем данные
+    service = request_data['service']
+    description = request_data['description']
+    district = request_data['district']
+    date = request_data['date']
+    budget = request_data['budget']
+    client_username = request_data.get('client_username')
+    client_user_id = request_data.get('client_user_id')
+
+    for master in masters:
+        master_id = master[0]
+        if has_premium(master_id):
+            # Есть подписка – отправляем с контактами
+            contact_info = f"👤 **Клиент:** @{client_username}" if client_username else f"👤 **Клиент:** ID {client_user_id}"
+            text = f"""
+📩 **Новая заявка по вашей специализации!**
+
+🔨 **Услуга:** {service}
+📝 **Задача:** {description}
+📍 **Район/ЖК:** {district}
+📅 **Когда:** {date}
+💰 **Бюджет:** {budget}
+{contact_info}
+
+💬 Свяжитесь с клиентом напрямую.
+            """
+        else:
+            # Нет подписки – уведомление без контактов + предложение
+            text = f"""
+📩 **Новая заявка по вашей специализации!**
+
+🔨 **Услуга:** {service}
+📝 **Задача:** {description}
+📍 **Район/ЖК:** {district}
+📅 **Когда:** {date}
+💰 **Бюджет:** {budget}
+
+🔒 **Контакты клиента скрыты.**  
+Чтобы получать контакты клиентов, оформите подписку: /subscribe
+            """
+        try:
+            bot.send_message(master_id, text)
+        except Exception as e:
+            print(f"Не удалось отправить уведомление мастеру {master_id}: {e}")
+
+@bot.message_handler(commands=['subscribe'])
+def subscribe(message):
+    if not only_private(message):
+        return
+    user_id = message.from_user.id
+    # Проверяем, является ли пользователь мастером
+    cursor.execute("SELECT id FROM masters WHERE user_id = ?", (user_id,))
+    if not cursor.fetchone():
+        bot.reply_to(message, "❌ Эта команда только для зарегистрированных мастеров.")
+        return
+
+    # Проверяем, есть ли уже подписка
+    if has_premium(user_id):
+        bot.reply_to(message, "✅ У вас уже есть активная подписка.")
+        return
+
+    # Отправляем предложение оформить подписку
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("💳 Оплатить 500 руб./мес", callback_data="pay_subscription"))
+    bot.send_message(
+        message.chat.id,
+        "🌟 **Полная подписка** даёт вам:\n"
+        "• Доступ к контактам клиентов из всех новых заявок\n"
+        "• Уведомления о заявках с контактами в личные сообщения\n"
+        "• Значок «✅ Верифицирован» в каталоге\n\n"
+        "Стоимость: **500 руб./месяц**.\n\n"
+        "Нажмите кнопку ниже для оплаты.",
+        reply_markup=markup
+    )
+@bot.callback_query_handler(func=lambda call: call.data == 'pay_subscription')
+def pay_subscription_callback(call):
+    user_id = call.from_user.id
+    # Создаём инвойс на 500 рублей (в звёздах)
+    # 1 звезда примерно = 1 рубль (уточните актуальный курс)
+    bot.send_invoice(
+        call.message.chat.id,
+        title="Подписка мастера на 1 месяц",
+        description="Доступ к контактам клиентов и статус верифицированного мастера",
+        invoice_payload="subscription_month",
+        provider_token="",  # для звёзд оставляем пустым
+        currency="XTR",
+        prices=[types.LabeledPrice(label="Подписка на месяц", amount=500)],  # 500 звёзд
+        start_parameter="subscribe"
+    )
+    bot.answer_callback_query(call.id)
+
+@bot.pre_checkout_query_handler(func=lambda query: True)
+def pre_checkout_handler(pre_checkout_query):
+    bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
+
+@bot.message_handler(content_types=['successful_payment'])
+def successful_payment_handler(message):
+    user_id = message.from_user.id
+    # Активируем подписку на месяц
+    expires = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
+    cursor.execute('INSERT OR REPLACE INTO premium_users (user_id, expires_at, subscription_type) VALUES (?, ?, ?)',
+                   (user_id, expires, 'monthly'))
+    conn.commit()
+    bot.send_message(message.chat.id, "✅ Подписка активирована! Спасибо за доверие.")
+
 # ================ ОТЗЫВ (ТОЛЬКО В ЛС) ================
 @bot.message_handler(commands=['review'])
 @bot.message_handler(func=lambda message: message.text == '⭐ Оставить отзыв')
