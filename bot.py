@@ -4338,6 +4338,20 @@ def greet_new_member(chat_member_update):
     except Exception as e:
         print(f"Не удалось отправить приветствие пользователю {user_id}: {e}")
 
+@bot.message_handler(commands=['show_recs'])
+def show_recommendations(message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    cursor.execute("SELECT * FROM recommendations ORDER BY id DESC LIMIT 10")
+    rows = cursor.fetchall()
+    if not rows:
+        bot.reply_to(message, "Таблица пуста.")
+        return
+    text = "📋 **Последние рекомендации:**\n\n"
+    for r in rows:
+        text += f"ID {r[0]}: @{r[2]} | {r[3]} – {r[4]}\nСтатус: {r[10]}\n\n"
+    bot.reply_to(message, text)
+
 # ================ ЗАПУСК БОТА ================
 if __name__ == '__main__':
     print("=" * 60)
