@@ -23,6 +23,19 @@ def single_instance():
 
 single_instance()
 
+def has_premium(user_id):
+    """Проверяет, активна ли подписка у мастера"""
+    cursor.execute('SELECT expires_at FROM premium_users WHERE user_id = ?', (user_id,))
+    row = cursor.fetchone()
+    if not row:
+        return False
+    try:
+        expires = datetime.strptime(row[0], "%Y-%m-%d %H:%M:%S")
+        return expires > datetime.now()
+    except:
+        return False
+
+
 # ================ ПОДКЛЮЧЕНИЕ GOOGLE SHEETS (опционально) ================
 try:
     import gspread
@@ -241,6 +254,12 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS rec_comments
                  created_at TEXT)''')
 
 conn.commit()
+
+# Таблица платных подписок мастеров
+cursor.execute('''CREATE TABLE IF NOT EXISTS premium_users
+                (user_id INTEGER PRIMARY KEY,
+                 expires_at TEXT,
+                 subscription_type TEXT)''')
 
 # ================ ФУНКЦИИ GOOGLE SHEETS (опционально, сокращено для объёма) ================
 def get_google_sheet():
