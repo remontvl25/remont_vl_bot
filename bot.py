@@ -38,12 +38,13 @@ if not TOKEN:
     print("❌ Токен не найден в переменных окружения!")
     sys.exit(1)
 
-CHAT_ID = os.environ.get('CHAT_ID', "@remontvl25chat")
-CHANNEL_LINK = os.environ.get('CHANNEL_LINK', "@remont_vl25")
+CHAT_ID = os.environ.get('CHAT_ID', "@remontvl25chat")          # общий чат (пока оставляем)
+CHANNEL_LINK = os.environ.get('CHANNEL_LINK', "@remont_vl25")   # канал
 ADMIN_ID = int(os.environ.get('ADMIN_ID', '0'))
-MASTER_CHAT_ID = os.environ.get('MASTER_CHAT_ID', '@remont_masters')
+MASTER_CHAT_ID = os.environ.get('MASTER_CHAT_ID', '@remontvl25masters')
 MASTER_CHAT_INVITE_LINK = os.environ.get('MASTER_CHAT_INVITE_LINK', '')
 
+# Google Forms (опционально)
 GOOGLE_FORMS_BASE = os.environ.get('GOOGLE_FORMS_BASE', '')
 FORM_ENTRY_TG_ID = os.environ.get('FORM_ENTRY_TG_ID', '')
 FORM_ENTRY_TG_USERNAME = os.environ.get('FORM_ENTRY_TG_USERNAME', '')
@@ -71,8 +72,9 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS requests
                  district TEXT,
                  date TEXT,
                  budget TEXT,
-                 status TEXT,
-                 is_public INTEGER DEFAULT 1,
+                 status TEXT DEFAULT 'активна',
+                 is_public INTEGER DEFAULT 0,
+                 chosen_master_id INTEGER DEFAULT NULL,
                  chat_message_id INTEGER,
                  created_at TEXT)''')
 
@@ -80,13 +82,14 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS requests
 cursor.execute('''CREATE TABLE IF NOT EXISTS reviews
                 (id INTEGER PRIMARY KEY,
                  master_name TEXT,
+                 master_id INTEGER,
                  user_name TEXT,
                  review_text TEXT,
                  rating INTEGER,
-                 status TEXT,
+                 status TEXT DEFAULT 'pending',
                  created_at TEXT)''')
 
-# ----- Таблица проверенных мастеров (одна запись – одна услуга) -----
+# ----- Таблица мастеров (одна запись – одна услуга) -----
 cursor.execute('''CREATE TABLE IF NOT EXISTS masters
                 (id INTEGER PRIMARY KEY,
                  user_id INTEGER,
@@ -111,7 +114,7 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS masters
                  source TEXT DEFAULT 'bot',
                  created_at TEXT)''')
 
-# ----- Таблица анкет мастеров (на проверку, одна запись – одна услуга) -----
+# ----- Таблица анкет мастеров (на проверку) -----
 cursor.execute('''CREATE TABLE IF NOT EXISTS master_applications
                 (id INTEGER PRIMARY KEY,
                  user_id INTEGER,
@@ -176,11 +179,15 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS rec_comments
                  comment TEXT,
                  created_at TEXT)''')
 
-# ----- Таблица платных подписок мастеров (пока не используется) -----
-cursor.execute('''CREATE TABLE IF NOT EXISTS premium_users
-                (user_id INTEGER PRIMARY KEY,
-                 expires_at TEXT,
-                 subscription_type TEXT)''')
+# ----- Таблица откликов мастеров на заявки -----
+cursor.execute('''CREATE TABLE IF NOT EXISTS responses
+                (id INTEGER PRIMARY KEY,
+                 request_id INTEGER,
+                 master_id INTEGER,          -- id из таблицы masters
+                 price TEXT,
+                 comment TEXT,
+                 status TEXT DEFAULT 'pending',  -- pending, accepted, rejected
+                 created_at TEXT)''')
 
 conn.commit()
 
@@ -302,18 +309,6 @@ def check_bot_admin_in_chat(chat_id):
         print(f"⚠️ Не удалось проверить права в чате {chat_id}: {e}")
         return False
 
-def has_premium(user_id):
-    """Проверяет, активна ли подписка у мастера (пока не используется)"""
-    cursor.execute('SELECT expires_at FROM premium_users WHERE user_id = ?', (user_id,))
-    row = cursor.fetchone()
-    if not row:
-        return False
-    try:
-        expires = datetime.strptime(row[0], "%Y-%m-%d %H:%M:%S")
-        return expires > datetime.now()
-    except:
-        return False
-
 # ================ УДАЛЕНИЕ КОМАНД В ЧАТЕ ================
 @bot.message_handler(func=lambda message: message.chat.type != 'private')
 def delete_group_commands(message):
@@ -329,7 +324,7 @@ def show_role_menu(message, role):
     if role == 'client':
         markup.row('🔨 Оставить заявку', '🔍 Найти мастера')
         markup.row('⭐ Оставить отзыв', '👍 Рекомендовать мастера')
-        markup.row('📢 Канал с мастерами')
+        markup.row('📢 Канал с мастерами', '📋 Мои заявки')
         text = "👋 **Режим: Клиент**\n\n• Ищете мастера? Оставьте заявку или выберите из каталога.\n• Понравился мастер? Оставьте отзыв.\n• Знаете хорошего специалиста? Порекомендуйте его!"
     elif role == 'master':
         markup.row('👷 Заполнить анкету', '📋 Анкета (Google Forms)')
@@ -361,7 +356,7 @@ def start(message):
             "👇 Вся работа со мной — в личных сообщениях:\n"
             "👉 @remont_vl25_chat_bot\n\n"
             "Там вы можете:\n"
-            "✅ Оставить публичную или приватную заявку\n"
+            "✅ Оставить заявку\n"
             "✅ Найти мастера в каталоге\n"
             "✅ Стать мастером и добавить анкету\n"
             "✅ Оставить отзыв или рекомендацию\n"
@@ -480,6 +475,13 @@ def channel_link(message):
         reply_markup=markup
     )
 
+# ================ КНОПКА "МОИ ЗАЯВКИ" ================
+@bot.message_handler(func=lambda message: message.text == '📋 Мои заявки')
+def my_requests_handler(message):
+    if not only_private(message):
+        return
+    my_requests(message)
+
 # ================ ПЕРСОНАЛИЗИРОВАННАЯ ССЫЛКА НА GOOGLE FORMS ================
 def generate_form_url(user_id, username):
     if not GOOGLE_FORMS_BASE or not FORM_ENTRY_TG_ID:
@@ -555,7 +557,7 @@ def entity_callback(call):
         f"Шаг 2 из 13\n"
         f"👇 **ВЫБЕРИТЕ ТИП РАЗМЕЩЕНИЯ:**\n\n"
         f"✅ **Полная регистрация** – вы заполняете все данные, после проверки попадёте в базу и чат мастеров.\n"
-        f"🔹 **Упрощённое размещение** – вы сразу попадаете в базу (без проверки), но не будете получать уведомления о приватных заявках. В любой момент можно пройти полную регистрацию.",
+        f"🔹 **Упрощённое размещение** – вы сразу попадаете в базу (без проверки), но не будете получать уведомления о заявках. В любой момент можно пройти полную регистрацию.",
         call.message.chat.id,
         call.message.message_id,
         reply_markup=markup
@@ -1255,6 +1257,7 @@ def comment_recommendation(message):
 # ================ РЕКОМЕНДАЦИИ ЧЕРЕЗ ХЕШТЕГИ В ЧАТЕ ================
 @bot.message_handler(func=lambda message: message.chat.type != 'private')
 def handle_chat_recommendations(message):
+    print(f"🔍 Сообщение в группе: {message.text}")
     if message.text and message.text.startswith('/'):
         return
     text = message.text.strip()
@@ -1429,7 +1432,7 @@ def subscribe(message):
         return
     bot.reply_to(message, "ℹ️ В данный момент подписка не требуется. Все функции бесплатны.")
 
-# ================ ЗАЯВКИ ================
+# ================ НОВЫЙ МЕХАНИЗМ ЗАЯВОК ================
 if not hasattr(bot, 'request_temp'):
     bot.request_temp = {}
 
@@ -1550,85 +1553,36 @@ def process_budget(message, service, description, district, date):
         'budget': budget
     }
 
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        types.InlineKeyboardButton("🔓 Публичная (видят все)", callback_data="req_public"),
-        types.InlineKeyboardButton("🔒 Приватная (только мастерам)", callback_data="req_private")
-    )
-    bot.send_message(
-        message.chat.id,
-        "Выберите тип заявки:",
-        reply_markup=markup
-    )
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith('req_'))
-def request_type_callback(call):
-    is_public = 1 if call.data == 'req_public' else 0
-    user_id = call.from_user.id
-    if user_id not in bot.request_temp:
-        bot.answer_callback_query(call.id, "❌ Ошибка, начните заново.")
-        return
-
+    # В новой системе не спрашиваем тип, всегда приватно (без публикации)
+    # Можно убрать выбор типа, либо оставить для будущего. Пока сохраняем как приватную (is_public=0)
     data = bot.request_temp[user_id]
-    data['is_public'] = is_public
+    data['is_public'] = 0
 
-    # Сохраняем в БД
+    # Сохраняем заявку в БД
     cursor.execute('''INSERT INTO requests 
                     (user_id, username, service, description, district, date, budget, status, is_public, created_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                     (user_id,
-                     call.from_user.username or "",
-                     data['service'], data['description'], data['district'], data['date'], data['budget'],
-                     'активна', is_public,
+                     message.from_user.username or "",
+                     service, description, district, date, budget,
+                     'активна', 0,
                      datetime.now().strftime("%d.%m.%Y %H:%M")))
     conn.commit()
     request_id = cursor.lastrowid
 
-    client_alias = f"Клиент #{request_id % 10000}"
-    request_text = f"""
-🆕 **НОВАЯ ЗАЯВКА!**
+    bot.send_message(
+        message.chat.id,
+        "✅ **ЗАЯВКА СОЗДАНА!**\n\n"
+        "Мы оповестили мастеров. Когда кто-то откликнется, вы получите уведомление."
+    )
 
-👤 **От:** {client_alias}
-🔨 **Услуга:** {data['service']}
-📝 **Задача:** {data['description']}
-📍 **Район/ЖК:** {data['district']}
-📅 **Когда:** {data['date']}
-💰 **Бюджет:** {data['budget']}
-"""
+    # Рассылаем уведомления мастерам (без контактов, с кнопкой отклика)
+    notify_masters_about_new_request(request_id, data)
 
-    if is_public:
-        request_text += "\n👇 **Мастера, откликайтесь в комментариях!**"
-        target_chat = CHAT_ID
-        reply_msg = "✅ Ваша заявка опубликована в общем чате."
-    else:
-        request_text += "\n📌 **Приватная заявка (только для мастеров)**"
-        target_chat = MASTER_CHAT_ID
-        reply_msg = "✅ Ваша заявка отправлена мастерам (приватно)."
-
-    try:
-        sent = bot.send_message(target_chat, request_text)
-        cursor.execute('UPDATE requests SET chat_message_id = ? WHERE id = ?', (sent.message_id, request_id))
-        bot.send_message(call.message.chat.id, reply_msg)
-    except Exception as e:
-        bot.send_message(call.message.chat.id, "❌ Ошибка отправки заявки. Администратор уже уведомлён.")
-        print(f"Ошибка отправки в чат {target_chat}: {e}")
-
-    # Уведомляем мастеров
-    notify_masters_about_request({
-        'service': data['service'],
-        'description': data['description'],
-        'district': data['district'],
-        'date': data['date'],
-        'budget': data['budget'],
-        'client_username': call.from_user.username,
-        'client_user_id': user_id,
-        'is_public': is_public
-    })
-
+    show_role_menu(message, 'client')
     del bot.request_temp[user_id]
-    bot.answer_callback_query(call.id)
 
-def notify_masters_about_request(request_data):
+def notify_masters_about_new_request(request_id, request_data):
     service = request_data['service']
     cursor.execute('''
         SELECT DISTINCT user_id FROM masters 
@@ -1638,367 +1592,608 @@ def notify_masters_about_request(request_data):
     if not masters:
         return
 
-    public_text = " (публичная)" if request_data.get('is_public', 1) else " (приватная)"
-    contact = f"👤 **Клиент:** @{request_data['client_username']}" if request_data['client_username'] else f"👤 **Клиент:** ID {request_data['client_user_id']}"
-
     text = f"""
-📩 **Новая заявка{public_text} по вашей специализации!**
+📩 **Новая заявка по вашей специализации!**
 
 🔨 **Услуга:** {service}
 📝 **Задача:** {request_data['description']}
 📍 **Район/ЖК:** {request_data['district']}
 📅 **Когда:** {request_data['date']}
 💰 **Бюджет:** {request_data['budget']}
-{contact}
 
-💬 Свяжитесь с клиентом напрямую.
+💬 Нажмите кнопку ниже, чтобы откликнуться и предложить свою цену.
     """
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton(
+        "💰 Откликнуться",
+        callback_data=f"respond_{request_id}"
+    ))
 
     for (master_id,) in masters:
         try:
-            bot.send_message(master_id, text)
+            bot.send_message(master_id, text, reply_markup=markup)
         except Exception as e:
             print(f"Не удалось отправить уведомление мастеру {master_id}: {e}")
 
-@bot.message_handler(func=lambda message: 
-    message.chat.type != 'private' and 
-    message.reply_to_message and 
-    message.reply_to_message.from_user.id == bot.get_me().id
-)
-def handle_master_reply(message):
-    cursor.execute("SELECT 1 FROM masters WHERE user_id = ? AND status = 'активен'", (message.from_user.id,))
-    if not cursor.fetchone():
-        bot.reply_to(
-            message,
-            "❌ Только зарегистрированные мастера могут получать контакты клиентов.\n"
-            "Зарегистрируйтесь и пройдите проверку."
-        )
+# ================ ПЕРСОНАЛЬНАЯ ЗАЯВКА ИЗ КАРТОЧКИ МАСТЕРА ================
+@bot.callback_query_handler(func=lambda call: call.data.startswith('request_to_master_'))
+def request_to_master_callback(call):
+    master_id = int(call.data.split('_')[3])
+    cursor.execute('SELECT user_id, service FROM masters WHERE id = ?', (master_id,))
+    master = cursor.fetchone()
+    if not master:
+        bot.answer_callback_query(call.id, "❌ Мастер не найден.")
         return
-    replied_msg_id = message.reply_to_message.message_id
-    cursor.execute("SELECT user_id, username FROM requests WHERE chat_message_id = ?", (replied_msg_id,))
-    row = cursor.fetchone()
-    if not row:
-        bot.reply_to(message, "❌ Не удалось найти заявку. Возможно, она устарела.")
-        return
-    client_user_id, client_username = row
-    if client_username:
-        contact = f"📬 **Контакт клиента:** @{client_username}"
-    else:
-        contact = f"📬 **Контакт клиента:** пользователь (ID {client_user_id})"
-    try:
-        bot.send_message(
-            message.from_user.id,
-            f"{contact}\n\n"
-            f"📌 Заявка: {message.reply_to_message.text[:200]}...\n"
-            f"Свяжитесь с клиентом для обсуждения деталей."
-        )
-        try:
-            bot.react_to(message, '👍')
-        except:
-            pass
-    except Exception as e:
-        bot.reply_to(message, "❌ Не удалось отправить контакт в ЛС. Возможно, вы заблокировали бота.")
-        return
-    try:
-        bot.send_message(
-            client_user_id,
-            f"👋 На вашу заявку откликнулся мастер @{message.from_user.username}!\n\n"
-            f"Он уже получил ваш контакт и скоро свяжется с вами.\n"
-            f"Вы также можете написать ему: @{message.from_user.username}"
-        )
-    except:
-        pass
+    master_user_id, service = master
+    user_id = call.from_user.id
 
-# ================ ПОИСК МАСТЕРОВ (КАТАЛОГ) ================
-@bot.message_handler(commands=['search'])
-@bot.message_handler(func=lambda message: message.text == '🔍 Найти мастера')
-def search_master(message):
-    if not only_private(message):
+    # Сохраняем в состоянии, что заявка для конкретного мастера
+    if not hasattr(bot, 'request_data'):
+        bot.request_data = {}
+    bot.request_data[user_id] = {
+        'master_id': master_user_id,
+        'service': service,
+        'is_personal': True
+    }
+
+    bot.edit_message_text(
+        "🔨 **СОЗДАНИЕ ПЕРСОНАЛЬНОЙ ЗАЯВКИ**\n\n"
+        "Опишите задачу, которую нужно выполнить этому мастеру:",
+        call.message.chat.id,
+        call.message.message_id
+    )
+    bot.register_next_step_handler(call.message, process_personal_description, master_user_id, service)
+    bot.answer_callback_query(call.id)
+
+def process_personal_description(message, master_user_id, service):
+    if message.chat.type != 'private':
         return
-    cursor.execute("SELECT DISTINCT service FROM masters WHERE status = 'активен' ORDER BY service")
-    services = cursor.fetchall()
-    if not services:
+    description = safe_text(message)
+    if not description:
+        bot.send_message(message.chat.id, "❌ Пожалуйста, опишите задачу.")
+        return
+    user_id = message.from_user.id
+    if not hasattr(bot, 'request_data'):
+        bot.request_data = {}
+    bot.request_data[user_id]['description'] = description
+
+    msg = bot.send_message(
+        message.chat.id,
+        "📍 **Укажите район или ЖК:**\n"
+        "Например: Патрокл, Снеговая Падь, Варяг, Океан"
+    )
+    bot.register_next_step_handler(msg, process_personal_district, master_user_id, service, description)
+
+def process_personal_district(message, master_user_id, service, description):
+    if message.chat.type != 'private':
+        return
+    district = safe_text(message)
+    if not district:
+        bot.send_message(message.chat.id, "❌ Пожалуйста, укажите район.")
+        return
+    user_id = message.from_user.id
+    bot.request_data[user_id]['district'] = district
+
+    msg = bot.send_message(
+        message.chat.id,
+        "📅 **Когда нужно выполнить работы?**\n"
+        "Например: Сегодня вечером, Завтра с 10:00, На этой неделе, Дата договорная"
+    )
+    bot.register_next_step_handler(msg, process_personal_date, master_user_id, service, description, district)
+
+def process_personal_date(message, master_user_id, service, description, district):
+    if message.chat.type != 'private':
+        return
+    date = safe_text(message)
+    if not date:
+        bot.send_message(message.chat.id, "❌ Пожалуйста, укажите дату.")
+        return
+    user_id = message.from_user.id
+    bot.request_data[user_id]['date'] = date
+
+    msg = bot.send_message(
+        message.chat.id,
+        "💰 **Ваш бюджет:**\n"
+        "Например: до 3000₽, договорной, 50000₽ за квартиру"
+    )
+    bot.register_next_step_handler(msg, process_personal_budget, master_user_id, service, description, district, date)
+
+def process_personal_budget(message, master_user_id, service, description, district, date):
+    if message.chat.type != 'private':
+        return
+    budget = safe_text(message)
+    if not budget:
+        bot.send_message(message.chat.id, "❌ Пожалуйста, укажите бюджет.")
+        return
+    user_id = message.from_user.id
+    data = bot.request_data[user_id]
+    # Сохраняем заявку в БД
+    cursor.execute('''INSERT INTO requests 
+                    (user_id, username, service, description, district, date, budget, status, is_public, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                    (user_id,
+                     message.from_user.username or "",
+                     service, description, district, date, budget,
+                     'активна', 0,  # приватная
+                     datetime.now().strftime("%d.%m.%Y %H:%M")))
+    conn.commit()
+    request_id = cursor.lastrowid
+
+    # Отправляем уведомление конкретному мастеру
+    try:
         markup = types.InlineKeyboardMarkup()
         markup.add(types.InlineKeyboardButton(
-            "📝 Оставить заявку в чате",
-            url=f"https://t.me/{CHAT_ID.replace('@', '')}"
+            "💰 Откликнуться",
+            callback_data=f"respond_{request_id}"
         ))
         bot.send_message(
-            message.chat.id,
-            "🔍 **В базе пока нет мастеров.**\n\n"
-            "Вы можете оставить заявку в чате – мастера сами откликнутся!",
+            master_user_id,
+            f"📩 **Персональная заявка для вас!**\n\n"
+            f"🔨 **Услуга:** {service}\n"
+            f"📝 **Задача:** {description}\n"
+            f"📍 **Район:** {district}\n"
+            f"📅 **Когда:** {date}\n"
+            f"💰 **Бюджет:** {budget}\n\n"
+            f"Нажмите кнопку, чтобы откликнуться и предложить свою цену.",
             reply_markup=markup
         )
-        return
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    buttons = []
-    for s in services:
-        service = s[0]
-        buttons.append(types.InlineKeyboardButton(service, callback_data=f"cat_{service}"))
-    markup.add(*buttons)
-    markup.add(types.InlineKeyboardButton("❌ Отмена", callback_data="cat_cancel"))
+    except Exception as e:
+        print(f"Не удалось отправить уведомление мастеру: {e}")
+
     bot.send_message(
         message.chat.id,
-        "🔍 **Каталог мастеров**\n\nВыберите специализацию:",
-        reply_markup=markup
+        "✅ **Ваша заявка отправлена мастеру!**\n"
+        "Когда он откликнется, вы получите уведомление."
     )
+    show_role_menu(message, 'client')
+    del bot.request_data[user_id]
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith('cat_'))
-def catalog_callback(call):
-    data = call.data[4:]
-    if data == 'cancel':
-        bot.edit_message_text("❌ Поиск отменён.", call.message.chat.id, call.message.message_id)
-        bot.answer_callback_query(call.id)
+# ================ ОТКЛИКИ МАСТЕРОВ ================
+if not hasattr(bot, 'response_temp'):
+    bot.response_temp = {}
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('respond_'))
+def respond_callback(call):
+    request_id = int(call.data.split('_')[1])
+    master_id = call.from_user.id  # это user_id мастера
+
+    # Проверяем, что мастер активен
+    cursor.execute('SELECT id FROM masters WHERE user_id = ? AND status = "активен"', (master_id,))
+    master_row = cursor.fetchone()
+    if not master_row:
+        bot.answer_callback_query(call.id, "❌ Вы не зарегистрированы как мастер.")
         return
-    service = data
-    user_id = call.from_user.id
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        types.InlineKeyboardButton("🌐 Все мастера", callback_data=f"filter_all_{service}")
-    )
-    bot.edit_message_text(
-        f"🔍 **{service}**\n\nПоказать всех мастеров?",
-        call.message.chat.id,
-        call.message.message_id,
-        reply_markup=markup
-    )
-    bot.answer_callback_query(call.id)
+    master_db_id = master_row[0]
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith('filter_'))
-def filter_callback(call):
-    parts = call.data.split('_', 2)
-    filter_type = parts[1]
-    service = parts[2]
-    user_id = call.from_user.id
-    if not hasattr(bot, 'catalog_states'):
-        bot.catalog_states = {}
-    bot.catalog_states[user_id] = {
-        'service': service,
-        'page': 0,
-        'filter': filter_type
+    # Сохраняем в временное хранилище
+    bot.response_temp[master_id] = {
+        'request_id': request_id,
+        'master_db_id': master_db_id
     }
-    show_masters_page(call.message, user_id, service, 0, filter_type)
+
+    bot.edit_message_text(
+        "💰 **Укажите вашу цену за выполнение работы:**\n"
+        "(например: 3000₽, 5000₽, договорная)",
+        call.message.chat.id,
+        call.message.message_id
+    )
+    bot.register_next_step_handler(call.message, process_response_price, request_id, master_db_id)
     bot.answer_callback_query(call.id)
 
-def show_masters_page(message, user_id, service, page, filter_type='all'):
-    LIMIT = 3
-    offset = page * LIMIT
-    condition = ""  # без верификации
-    query = f'''
-        SELECT name, service, districts, price_min, price_max, rating, reviews_count,
-               phone, entity_type, bio
-        FROM masters
-        WHERE service = ? AND status = 'активен' {condition}
-        ORDER BY rating DESC, reviews_count DESC
-        LIMIT ? OFFSET ?
-    '''
-    cursor.execute(query, (service, LIMIT, offset))
-    masters = cursor.fetchall()
-    query_count = f'SELECT COUNT(*) FROM masters WHERE service = ? AND status = "активен" {condition}'
-    cursor.execute(query_count, (service,))
-    total = cursor.fetchone()[0]
-    if not masters:
-        bot.edit_message_text(
-            f"❌ По специализации «{service}» больше нет мастеров.",
-            message.chat.id,
-            message.message_id
-        )
+def process_response_price(message, request_id, master_db_id):
+    if message.chat.type != 'private':
         return
-    total_pages = (total - 1) // LIMIT + 1
-    text = f"🔍 **Мастера – {service}** (страница {page+1}/{total_pages})\n\n"
-    for m in masters:
-        name, service, districts, price_min, price_max, rating, reviews, phone, entity_type, bio = m
-        phone_display = phone[:10] + '…' if len(phone) > 10 else phone
-        type_icon = '🏢' if entity_type == 'company' else '👤'
-        type_label = 'Компания' if entity_type == 'company' else 'Частное лицо'
-        text += f"{type_icon} **{name}** ({type_label})\n"
-        text += f"   📍 {districts}\n"
-        text += f"   💰 {price_min} – {price_max}\n"
-        text += f"   ⭐ {rating:.1f} ({reviews} отзывов)\n"
-        if bio and bio != 'Не указано':
-            text += f"   💬 {bio}\n"
-        text += f"   📞 Контакт: `{phone_display}` (после отклика)\n\n"
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    buttons = []
-    if page > 0:
-        buttons.append(types.InlineKeyboardButton(
-            "◀️ Назад", callback_data=f"page_{service}_{filter_type}_{page-1}"
-        ))
-    if offset + LIMIT < total:
-        buttons.append(types.InlineKeyboardButton(
-            "Вперёд ▶️", callback_data=f"page_{service}_{filter_type}_{page+1}"
-        ))
-    if buttons:
-        markup.add(*buttons)
-    markup.add(types.InlineKeyboardButton(
-        "🔙 К списку специализаций", callback_data="cat_back_to_services"
-    ))
-    bot.edit_message_text(
-        text,
+    price = safe_text(message)
+    if not price:
+        bot.send_message(message.chat.id, "❌ Пожалуйста, укажите цену.")
+        return
+    master_id = message.from_user.id
+    bot.response_temp[master_id]['price'] = price
+
+    msg = bot.send_message(
         message.chat.id,
-        message.message_id,
-        reply_markup=markup
+        "📝 **Добавьте комментарий (необязательно):**\n"
+        "(например: могу приступить сегодня, работаю с материалами заказчика и т.д.)\n"
+        "Или отправьте /skip, чтобы пропустить."
     )
+    bot.register_next_step_handler(msg, process_response_comment, request_id, master_db_id, price)
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith('page_'))
-def page_callback(call):
-    parts = call.data.split('_', 3)
-    service = parts[1]
-    filter_type = parts[2]
-    page = int(parts[3])
-    user_id = call.from_user.id
-    if not hasattr(bot, 'catalog_states'):
-        bot.catalog_states = {}
-    bot.catalog_states[user_id] = {
-        'service': service,
-        'page': page,
-        'filter': filter_type
-    }
-    show_masters_page(call.message, user_id, service, page, filter_type)
-    bot.answer_callback_query(call.id)
-
-@bot.callback_query_handler(func=lambda call: call.data == 'cat_back_to_services')
-def back_to_services(call):
-    user_id = call.from_user.id
-    if hasattr(bot, 'catalog_states') and user_id in bot.catalog_states:
-        del bot.catalog_states[user_id]
-    cursor.execute("SELECT DISTINCT service FROM masters WHERE status = 'активен' ORDER BY service")
-    services = cursor.fetchall()
-    if not services:
-        bot.edit_message_text("❌ База мастеров пуста.", call.message.chat.id, call.message.message_id)
-        bot.answer_callback_query(call.id)
+def process_response_comment(message, request_id, master_db_id, price):
+    if message.chat.type != 'private':
         return
-    markup = types.InlineKeyboardMarkup(row_width=2)
-    buttons = []
-    for s in services:
-        service = s[0]
-        buttons.append(types.InlineKeyboardButton(service, callback_data=f"cat_{service}"))
-    markup.add(*buttons)
-    markup.add(types.InlineKeyboardButton("❌ Отмена", callback_data="cat_cancel"))
+    master_id = message.from_user.id
+    if message.text == '/skip':
+        comment = ''
+    else:
+        comment = safe_text(message)
+        if not comment:
+            comment = ''
+
+    # Сохраняем отклик в БД
+    cursor.execute('''INSERT INTO responses
+                    (request_id, master_id, price, comment, created_at)
+                    VALUES (?, ?, ?, ?, ?)''',
+                    (request_id, master_db_id, price, comment,
+                     datetime.now().strftime("%d.%m.%Y %H:%M")))
+    conn.commit()
+    response_id = cursor.lastrowid
+
+    bot.send_message(
+        message.chat.id,
+        "✅ **Ваш отклик отправлен!**\n"
+        "Клиент получит уведомление и сможет выбрать вас."
+    )
+
+    # Уведомляем клиента о новом отклике
+    cursor.execute('SELECT user_id FROM requests WHERE id = ?', (request_id,))
+    client = cursor.fetchone()
+    if client:
+        try:
+            bot.send_message(
+                client[0],
+                f"👋 **На вашу заявку поступил новый отклик!**\n"
+                f"Мастер предложил цену: {price}\n"
+                f"Комментарий: {comment if comment else '—'}\n\n"
+                f"Вы можете посмотреть все отклики и выбрать мастера в разделе «Мои заявки»."
+            )
+        except:
+            pass
+
+    del bot.response_temp[master_id]
+    show_role_menu(message, 'master')
+
+# ================ ПРОСМОТР КЛИЕНТОМ ЗАЯВОК И ВЫБОР МАСТЕРА ================
+@bot.message_handler(commands=['my_requests'])
+def my_requests(message):
+    if not only_private(message):
+        return
+    user_id = message.from_user.id
+    cursor.execute('''
+        SELECT id, service, description, district, date, budget, status
+        FROM requests
+        WHERE user_id = ? AND status = 'активна' AND chosen_master_id IS NULL
+        ORDER BY created_at DESC
+    ''', (user_id,))
+    requests = cursor.fetchall()
+    if not requests:
+        bot.send_message(message.chat.id, "📭 У вас нет активных заявок.")
+        return
+
+    for req in requests:
+        req_id, service, desc, district, date, budget, status = req
+        cursor.execute('''
+            SELECT r.id, m.name, r.price, r.comment
+            FROM responses r
+            JOIN masters m ON r.master_id = m.id
+            WHERE r.request_id = ? AND r.status = 'pending'
+        ''', (req_id,))
+        responses = cursor.fetchall()
+
+        text = f"📌 **Заявка #{req_id}**\n🔨 {service}\n📍 {district}\n📅 {date}\n💰 {budget}\n📝 {desc}\n\n"
+        if responses:
+            text += "**Отклики:**\n"
+            markup = types.InlineKeyboardMarkup()
+            for resp in responses:
+                resp_id, master_name, price, comment = resp
+                text += f"• {master_name}: {price}\n  {comment[:50]}...\n"
+                markup.add(types.InlineKeyboardButton(
+                    f"✅ Выбрать {master_name}",
+                    callback_data=f"choose_master_{req_id}_{resp_id}"
+                ))
+            bot.send_message(message.chat.id, text, reply_markup=markup)
+        else:
+            text += "😴 Пока нет откликов."
+            bot.send_message(message.chat.id, text)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('choose_master_'))
+def choose_master_callback(call):
+    parts = call.data.split('_')
+    req_id = int(parts[2])
+    resp_id = int(parts[3])
+
+    # Обновляем заявку: chosen_master_id
+    cursor.execute('SELECT master_id, price FROM responses WHERE id = ?', (resp_id,))
+    resp = cursor.fetchone()
+    if not resp:
+        bot.answer_callback_query(call.id, "❌ Отклик не найден.")
+        return
+    master_db_id, price = resp
+
+    cursor.execute('UPDATE requests SET chosen_master_id = ? WHERE id = ?', (master_db_id, req_id))
+    cursor.execute('UPDATE responses SET status = "accepted" WHERE id = ?', (resp_id,))
+    conn.commit()
+
+    # Получаем данные мастера
+    cursor.execute('SELECT user_id, name, phone FROM masters WHERE id = ?', (master_db_id,))
+    master = cursor.fetchone()
+    if master:
+        master_user_id, master_name, master_phone = master
+        # Отправляем мастеру контакт клиента
+        cursor.execute('SELECT user_id, username FROM requests WHERE id = ?', (req_id,))
+        client = cursor.fetchone()
+        if client:
+            client_user_id, client_username = client
+            client_contact = f"@{client_username}" if client_username else f"ID {client_user_id}"
+            try:
+                bot.send_message(
+                    master_user_id,
+                    f"✅ Клиент выбрал вас для выполнения заявки #{req_id}!\n"
+                    f"Контакт клиента: {client_contact}\n"
+                    f"Свяжитесь с ним для обсуждения деталей."
+                )
+            except:
+                pass
+            # Отправляем клиенту контакт мастера
+            master_contact = f"@{master_phone}"  # если телефон, лучше не показывать как юзернейм; но пока так
+            try:
+                bot.send_message(
+                    client_user_id,
+                    f"✅ Вы выбрали мастера {master_name} для заявки #{req_id}.\n"
+                    f"Контакт мастера: {master_phone} (свяжитесь с ним)."
+                )
+            except:
+                pass
+
     bot.edit_message_text(
-        "🔍 **Каталог мастеров**\n\nВыберите специализацию:",
+        "✅ Вы выбрали мастера. Контакты отправлены обоим.",
         call.message.chat.id,
-        call.message.message_id,
-        reply_markup=markup
+        call.message.message_id
     )
     bot.answer_callback_query(call.id)
 
-# ================ ОТЗЫВ ================
+# ================ УЛУЧШЕННЫЕ ОТЗЫВЫ (С ВЫБОРОМ МАСТЕРА) ================
+if not hasattr(bot, 'review_data'):
+    bot.review_data = {}
+
 @bot.message_handler(commands=['review'])
 @bot.message_handler(func=lambda message: message.text == '⭐ Оставить отзыв')
 def add_review(message):
     if not only_private(message):
         return
-    msg = bot.send_message(
-        message.chat.id,
-        "⭐ **ОСТАВИТЬ ОТЗЫВ**\n\n"
-        "Напишите **ИМЯ МАСТЕРА** или **НАЗВАНИЕ БРИГАДЫ**:"
-    )
-    bot.register_next_step_handler(msg, process_review_master)
-
-def process_review_master(message):
-    if message.chat.type != 'private':
+    # Показываем список специализаций
+    cursor.execute("SELECT DISTINCT service FROM masters WHERE status = 'активен' ORDER BY service")
+    services = cursor.fetchall()
+    if not services:
+        bot.send_message(message.chat.id, "❌ В базе пока нет мастеров.")
         return
-    master = safe_text(message)
-    if not master:
-        bot.send_message(message.chat.id, "❌ Пожалуйста, введите имя мастера.")
-        return
-    msg = bot.send_message(
-        message.chat.id,
-        "📝 **НАПИШИТЕ ТЕКСТ ОТЗЫВА:**\n"
-        "Например: Сделал быстро, качественно, цена адекватная"
-    )
-    bot.register_next_step_handler(msg, process_review_text, master)
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    buttons = []
+    for s in services:
+        service = s[0]
+        buttons.append(types.InlineKeyboardButton(service, callback_data=f"rev_service_{service}"))
+    markup.add(*buttons)
+    markup.add(types.InlineKeyboardButton("❌ Отмена", callback_data="rev_cancel"))
+    bot.send_message(message.chat.id, "🔍 **Выберите специализацию мастера:**", reply_markup=markup)
 
-def process_review_text(message, master):
+@bot.callback_query_handler(func=lambda call: call.data.startswith('rev_service_'))
+def rev_service_callback(call):
+    service = call.data[12:]
+    user_id = call.from_user.id
+    if user_id not in bot.review_data:
+        bot.review_data[user_id] = {}
+    bot.review_data[user_id]['service'] = service
+
+    # Показываем мастеров этой специализации (первые 10)
+    cursor.execute('''
+        SELECT id, name FROM masters WHERE service = ? AND status = 'активен' ORDER BY name LIMIT 10
+    ''', (service,))
+    masters = cursor.fetchall()
+    if not masters:
+        bot.edit_message_text("❌ Нет мастеров этой специализации.", call.message.chat.id, call.message.message_id)
+        bot.answer_callback_query(call.id)
+        return
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    for m in masters:
+        markup.add(types.InlineKeyboardButton(m[1], callback_data=f"rev_master_{m[0]}"))
+    markup.add(types.InlineKeyboardButton("🔙 Назад", callback_data="rev_back_to_services"))
+    bot.edit_message_text("👤 **Выберите мастера:**", call.message.chat.id, call.message.message_id, reply_markup=markup)
+    bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('rev_master_'))
+def rev_master_callback(call):
+    master_id = int(call.data[11:])
+    user_id = call.from_user.id
+    bot.review_data[user_id]['master_id'] = master_id
+    bot.edit_message_text(
+        "📝 **Напишите текст отзыва:**\n"
+        "Например: Сделал быстро, качественно, цена адекватная",
+        call.message.chat.id,
+        call.message.message_id
+    )
+    bot.register_next_step_handler(call.message, process_review_text, master_id)
+    bot.answer_callback_query(call.id)
+
+def process_review_text(message, master_id):
     if message.chat.type != 'private':
         return
     review_text = safe_text(message)
     if not review_text:
         bot.send_message(message.chat.id, "❌ Пожалуйста, напишите текст отзыва.")
         return
-
-    cursor.execute('''INSERT INTO reviews
-                    (master_name, user_name, review_text, rating, status, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?)''',
-                    (master,
-                     message.from_user.username or message.from_user.first_name,
-                     review_text,
-                     0,
-                     'pending',
-                     datetime.now().strftime("%d.%m.%Y %H:%M")))
-    conn.commit()
-    review_id = cursor.lastrowid
+    user_id = message.from_user.id
+    bot.review_data[user_id]['text'] = review_text
 
     markup = types.InlineKeyboardMarkup(row_width=5)
     buttons = []
     for i in range(1, 6):
         buttons.append(types.InlineKeyboardButton(
-            "⭐" * i, callback_data=f"rate_{review_id}_{i}"
+            "⭐" * i, callback_data=f"rev_rate_{master_id}_{i}"
         ))
     markup.add(*buttons)
-
     bot.send_message(
         message.chat.id,
-        f"👤 **Мастер:** {master}\n"
+        f"👤 **Мастер:** ...\n"
         f"📝 **Отзыв:** {review_text}\n\n"
-        "⭐ **ОЦЕНИТЕ РАБОТУ ОТ 1 ДО 5:**",
+        "⭐ **Оцените работу от 1 до 5:**",
         reply_markup=markup
     )
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith('rate_'))
-def rate_callback(call):
-    _, review_id, rating = call.data.split('_')
-    review_id = int(review_id)
-    rating = int(rating)
+@bot.callback_query_handler(func=lambda call: call.data.startswith('rev_rate_'))
+def rev_rate_callback(call):
+    parts = call.data.split('_')
+    master_id = int(parts[2])
+    rating = int(parts[3])
+    user_id = call.from_user.id
+    review_text = bot.review_data[user_id]['text']
 
-    cursor.execute('''UPDATE reviews 
-                      SET rating = ?, status = 'published' 
-                      WHERE id = ?''', (rating, review_id))
-    conn.commit()
-
-    cursor.execute('''SELECT master_name, user_name, review_text, rating, created_at 
-                      FROM reviews WHERE id = ?''', (review_id,))
-    review = cursor.fetchone()
-    if not review:
-        bot.answer_callback_query(call.id, "Ошибка: отзыв не найден")
+    # Получаем данные мастера
+    cursor.execute('SELECT name FROM masters WHERE id = ?', (master_id,))
+    master = cursor.fetchone()
+    if not master:
+        bot.answer_callback_query(call.id, "❌ Мастер не найден.")
         return
+    master_name = master[0]
 
-    master_name, user_name, review_text, rating, created_at = review
+    cursor.execute('''INSERT INTO reviews
+                    (master_name, master_id, user_name, review_text, rating, status, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                    (master_name, master_id,
+                     call.from_user.username or call.from_user.first_name,
+                     review_text,
+                     rating,
+                     'pending',  # на модерацию
+                     datetime.now().strftime("%d.%m.%Y %H:%M")))
+    conn.commit()
+    review_id = cursor.lastrowid
 
-    extra_info = ""
-    cursor.execute('''SELECT service, phone, entity_type FROM masters WHERE name LIKE ?''', (f'%{master_name}%',))
-    master_data = cursor.fetchone()
-    if master_data:
-        service, phone, entity_type = master_data
-        type_icon = '🏢' if entity_type == 'company' else '👤'
-        type_label = 'Компания' if entity_type == 'company' else 'Частное лицо'
-        extra_info = f"{type_icon} {type_label}\n🔧 Специализация: {service}\n📞 Контакты: {phone[:10]}…"
+    # Уведомление админу
+    admin_msg = f"""
+⭐ **НОВЫЙ ОТЗЫВ (на модерации)!** (ID: {review_id})
+👤 **Мастер:** {master_name}
+⭐ **Оценка:** {'⭐' * rating}
+📝 **Отзыв:** {review_text}
+👤 **От кого:** @{call.from_user.username or "нет"}
+✅ Одобрить: /approve_review {review_id}
+❌ Отклонить: /reject_review {review_id}
+    """
+    try:
+        if ADMIN_ID != 0:
+            bot.send_message(ADMIN_ID, admin_msg)
+    except:
+        pass
 
-    review_public = f"""
+    bot.edit_message_text(
+        "✅ **СПАСИБО ЗА ОТЗЫВ!**\n\n"
+        "После проверки администратором он появится в канале.",
+        call.message.chat.id,
+        call.message.message_id
+    )
+    show_role_menu(call.message, 'client')
+    del bot.review_data[user_id]
+    bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda call: call.data == 'rev_back_to_services')
+def rev_back_to_services(call):
+    cursor.execute("SELECT DISTINCT service FROM masters WHERE status = 'активен' ORDER BY service")
+    services = cursor.fetchall()
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    buttons = []
+    for s in services:
+        service = s[0]
+        buttons.append(types.InlineKeyboardButton(service, callback_data=f"rev_service_{service}"))
+    markup.add(*buttons)
+    markup.add(types.InlineKeyboardButton("❌ Отмена", callback_data="rev_cancel"))
+    bot.edit_message_text("🔍 **Выберите специализацию мастера:**", call.message.chat.id, call.message.message_id, reply_markup=markup)
+    bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda call: call.data == 'rev_cancel')
+def rev_cancel(call):
+    bot.edit_message_text("❌ Отмена.", call.message.chat.id, call.message.message_id)
+    bot.answer_callback_query(call.id)
+
+# ================ АДМИН-КОМАНДЫ ДЛЯ ОТЗЫВОВ ================
+@bot.message_handler(commands=['approve_review'])
+def approve_review(message):
+    if message.from_user.id != ADMIN_ID:
+        bot.reply_to(message, "❌ Нет прав.")
+        return
+    try:
+        review_id = int(message.text.split()[1])
+        cursor.execute('UPDATE reviews SET status = "published" WHERE id = ?', (review_id,))
+        conn.commit()
+        # Получаем данные отзыва для публикации в канале
+        cursor.execute('''
+            SELECT master_name, user_name, review_text, rating, created_at
+            FROM reviews WHERE id = ?
+        ''', (review_id,))
+        rev = cursor.fetchone()
+        if rev:
+            master_name, user_name, review_text, rating, created_at = rev
+            # Публикуем в канале
+            review_public = f"""
 ⭐ **НОВЫЙ ОТЗЫВ!**
 
 👤 **Мастер:** {master_name}
 ⭐ **Оценка:** {'⭐' * rating}
 📝 **Отзыв:** {review_text}
 👤 **От кого:** @{user_name}
-{extra_info}
 ⏰ {created_at}
 """
-    bot.send_message(CHAT_ID, review_public)
+            bot.send_message(CHANNEL_LINK, review_public)
+        bot.reply_to(message, f"✅ Отзыв {review_id} одобрен и опубликован.")
+    except Exception as e:
+        bot.reply_to(message, f"❌ Ошибка: {e}")
 
-    bot.answer_callback_query(call.id, f"Спасибо! Оценка {rating} ⭐ сохранена")
-    bot.edit_message_text(
-        f"✅ **СПАСИБО ЗА ОТЗЫВ!**\n\n"
-        f"👤 **Мастер:** {master_name}\n"
-        f"⭐ **Оценка:** {'⭐' * rating}\n"
-        f"📝 **Отзыв:** {review_text}\n\n"
-        f"Ваш отзыв опубликован в чате {CHAT_ID}",
-        call.message.chat.id,
-        call.message.message_id
-    )
+@bot.message_handler(commands=['reject_review'])
+def reject_review(message):
+    if message.from_user.id != ADMIN_ID:
+        bot.reply_to(message, "❌ Нет прав.")
+        return
+    try:
+        review_id = int(message.text.split()[1])
+        cursor.execute('UPDATE reviews SET status = "rejected" WHERE id = ?', (review_id,))
+        conn.commit()
+        bot.reply_to(message, f"❌ Отзыв {review_id} отклонён.")
+    except Exception as e:
+        bot.reply_to(message, f"❌ Ошибка: {e}")
 
-# ================ КОМАНДЫ АДМИНИСТРАТОРА ================
+# ================ ПУБЛИКАЦИЯ КАРТОЧКИ МАСТЕРА (с кнопкой прямой заявки) ================
+def publish_master_card(master_data, master_id=None):
+    if master_data.get('entity_type') == 'company':
+        type_icon = '🏢'
+        type_text = 'Компания'
+    else:
+        type_icon = '👤'
+        type_text = 'Частное лицо'
+    verif_text = '✅ Верифицирован' if master_data.get('verification_type') == 'full' else '🔹 Без верификации'
+    card = f"""
+{type_icon} **{master_data['name']}** ({type_text})
+🔧 **Специализация:** {master_data['service']}
+📍 **Районы:** {master_data['districts']}
+💰 **Цены:** {master_data['price_min']} – {master_data['price_max']}
+⏱ **Опыт:** {master_data['experience']}
+"""
+    if master_data.get('bio') and master_data['bio'] != 'Не указано':
+        card += f"💬 **О себе:** {master_data['bio']}\n"
+    if master_data.get('portfolio') and master_data['portfolio'] != 'Не указано':
+        card += f"📸 **Портфолио:** {master_data['portfolio']}\n"
+    docs = '✅ Есть' if master_data.get('documents_verified') else '⏳ Ожидает'
+    photos = '✅ Есть' if master_data.get('photos_verified') else '⏳ Ожидает'
+    rating = master_data.get('rating', 0)
+    reviews_count = master_data.get('reviews_count', 0)
+    card += f"""
+🛡 **Статус проверки:** {verif_text}
+   📄 Документы: {docs}
+   📷 Фото работ: {photos}
+   💬 Отзывы: ⭐ {rating:.1f} ({reviews_count} отзывов)
+"""
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton(
+        "📩 Оставить заявку этому мастеру",
+        callback_data=f"request_to_master_{master_id}"
+    ))
+    try:
+        sent = bot.send_message(CHANNEL_LINK, card, reply_markup=markup)
+        print(f"✅ Карточка мастера {master_data['name']} опубликована в канале, message_id={sent.message_id}")
+        if master_id:
+            cursor.execute('UPDATE masters SET channel_message_id = ? WHERE id = ?', (sent.message_id, master_id))
+            conn.commit()
+        return sent.message_id
+    except Exception as e:
+        print(f"❌ Ошибка публикации карточки: {e}")
+        return None
+
+# ================ КОМАНДЫ АДМИНИСТРАТОРА ДЛЯ МАСТЕРОВ ================
 @bot.message_handler(commands=['approve'])
 def approve_master(message):
     if message.from_user.id != ADMIN_ID:
@@ -2072,7 +2267,7 @@ def approve_master(message):
                 f"📌 **Что дальше?**\n"
                 f"1. Клиенты будут видеть вашу карточку и смогут оставлять заявки.\n"
                 f"2. Вы получите уведомление, когда кто-то оставит заявку по вашей специализации.\n"
-                f"3. Отвечайте на заявки в чате @remontvl25chat (публичные) или в закрытом чате (приватные)."
+                f"3. Отвечайте на заявки, чтобы получать заказы."
             )
         except:
             pass
@@ -2157,7 +2352,6 @@ def view_master(message):
             bot.reply_to(message, f"❌ Мастер с ID {master_id} не найден.")
             return
 
-        # Индексы полей (id, user_id, name, service, phone, districts, price_min, price_max, experience, bio, portfolio, rating, reviews_count, status, entity_type, verification_type, documents_verified, photos_verified, reviews_verified, channel_message_id, source, created_at)
         text = f"""
 📌 **Мастер ID:** {m[0]}
 👤 **Имя:** {m[2]}
@@ -2374,55 +2568,157 @@ def verify_all(call):
     conn.commit()
     bot.answer_callback_query(call.id, "✅ Мастер полностью верифицирован")
 
-# ================ ПУБЛИКАЦИЯ КАРТОЧКИ МАСТЕРА ================
-def publish_master_card(master_data, master_id=None):
-    if master_data.get('entity_type') == 'company':
-        type_icon = '🏢'
-        type_text = 'Компания'
-    else:
-        type_icon = '👤'
-        type_text = 'Частное лицо'
-    verif_text = '✅ Верифицирован' if master_data.get('verification_type') == 'full' else '🔹 Без верификации'
-    card = f"""
-{type_icon} **{master_data['name']}** ({type_text})
-🔧 **Специализация:** {master_data['service']}
-📍 **Районы:** {master_data['districts']}
-💰 **Цены:** {master_data['price_min']} – {master_data['price_max']}
-⏱ **Опыт:** {master_data['experience']}
-"""
-    if master_data.get('bio') and master_data['bio'] != 'Не указано':
-        card += f"💬 **О себе:** {master_data['bio']}\n"
-    if master_data.get('portfolio') and master_data['portfolio'] != 'Не указано':
-        card += f"📸 **Портфолио:** {master_data['portfolio']}\n"
-    docs = '✅ Есть' if master_data.get('documents_verified') else '⏳ Ожидает'
-    photos = '✅ Есть' if master_data.get('photos_verified') else '⏳ Ожидает'
-    rating = master_data.get('rating', 0)
-    reviews_count = master_data.get('reviews_count', 0)
-    card += f"""
-🛡 **Статус проверки:** {verif_text}
-   📄 Документы: {docs}
-   📷 Фото работ: {photos}
-   💬 Отзывы: ⭐ {rating:.1f} ({reviews_count} отзывов)
-"""
-    if master_data.get('username'):
-        contact = f"📞 **Контакт:** @{master_data['username']}"
-    else:
-        contact = f"📞 **Контакт:** `{master_data.get('phone', 'Не указан')[:10]}…`"
-    card += f"""
-{contact}
+# ================ ПОИСК МАСТЕРОВ (КАТАЛОГ) ================
+@bot.message_handler(commands=['search'])
+@bot.message_handler(func=lambda message: message.text == '🔍 Найти мастера')
+def search_master(message):
+    if not only_private(message):
+        return
+    cursor.execute("SELECT DISTINCT service FROM masters WHERE status = 'активен' ORDER BY service")
+    services = cursor.fetchall()
+    if not services:
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton(
+            "📝 Оставить заявку",
+            callback_data="create_request"
+        ))
+        bot.send_message(
+            message.chat.id,
+            "🔍 **В базе пока нет мастеров.**\n\n"
+            "Вы можете оставить заявку – мы оповестим мастеров.",
+            reply_markup=markup
+        )
+        return
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    buttons = []
+    for s in services:
+        service = s[0]
+        buttons.append(types.InlineKeyboardButton(service, callback_data=f"cat_{service}"))
+    markup.add(*buttons)
+    markup.add(types.InlineKeyboardButton("❌ Отмена", callback_data="cat_cancel"))
+    bot.send_message(
+        message.chat.id,
+        "🔍 **Каталог мастеров**\n\nВыберите специализацию:",
+        reply_markup=markup
+    )
 
-👉 **Оставить заявку:** @remontvl25chat
-"""
-    try:
-        sent = bot.send_message(CHANNEL_LINK, card)
-        print(f"✅ Карточка мастера {master_data['name']} опубликована в канале, message_id={sent.message_id}")
-        if master_id:
-            cursor.execute('UPDATE masters SET channel_message_id = ? WHERE id = ?', (sent.message_id, master_id))
-            conn.commit()
-        return sent.message_id
-    except Exception as e:
-        print(f"❌ Ошибка публикации карточки: {e}")
-        return None
+@bot.callback_query_handler(func=lambda call: call.data.startswith('cat_'))
+def catalog_callback(call):
+    data = call.data[4:]
+    if data == 'cancel':
+        bot.edit_message_text("❌ Поиск отменён.", call.message.chat.id, call.message.message_id)
+        bot.answer_callback_query(call.id)
+        return
+    service = data
+    user_id = call.from_user.id
+    if not hasattr(bot, 'catalog_states'):
+        bot.catalog_states = {}
+    bot.catalog_states[user_id] = {
+        'service': service,
+        'page': 0
+    }
+    show_masters_page(call.message, user_id, service, 0)
+    bot.answer_callback_query(call.id)
+
+def show_masters_page(message, user_id, service, page):
+    LIMIT = 3
+    offset = page * LIMIT
+    query = '''
+        SELECT name, service, districts, price_min, price_max, rating, reviews_count,
+               phone, entity_type, bio
+        FROM masters
+        WHERE service = ? AND status = 'активен'
+        ORDER BY rating DESC, reviews_count DESC
+        LIMIT ? OFFSET ?
+    '''
+    cursor.execute(query, (service, LIMIT, offset))
+    masters = cursor.fetchall()
+    query_count = 'SELECT COUNT(*) FROM masters WHERE service = ? AND status = "активен"'
+    cursor.execute(query_count, (service,))
+    total = cursor.fetchone()[0]
+    if not masters:
+        bot.edit_message_text(
+            f"❌ По специализации «{service}» больше нет мастеров.",
+            message.chat.id,
+            message.message_id
+        )
+        return
+    total_pages = (total - 1) // LIMIT + 1
+    text = f"🔍 **Мастера – {service}** (страница {page+1}/{total_pages})\n\n"
+    for m in masters:
+        name, service, districts, price_min, price_max, rating, reviews, phone, entity_type, bio = m
+        phone_display = phone[:10] + '…' if len(phone) > 10 else phone
+        type_icon = '🏢' if entity_type == 'company' else '👤'
+        type_label = 'Компания' if entity_type == 'company' else 'Частное лицо'
+        text += f"{type_icon} **{name}** ({type_label})\n"
+        text += f"   📍 {districts}\n"
+        text += f"   💰 {price_min} – {price_max}\n"
+        text += f"   ⭐ {rating:.1f} ({reviews} отзывов)\n"
+        if bio and bio != 'Не указано':
+            text += f"   💬 {bio}\n"
+        text += f"   📞 Контакт: `{phone_display}` (после отклика)\n\n"
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    buttons = []
+    if page > 0:
+        buttons.append(types.InlineKeyboardButton(
+            "◀️ Назад", callback_data=f"page_{service}_{page-1}"
+        ))
+    if offset + LIMIT < total:
+        buttons.append(types.InlineKeyboardButton(
+            "Вперёд ▶️", callback_data=f"page_{service}_{page+1}"
+        ))
+    if buttons:
+        markup.add(*buttons)
+    markup.add(types.InlineKeyboardButton(
+        "🔙 К списку специализаций", callback_data="cat_back_to_services"
+    ))
+    bot.edit_message_text(
+        text,
+        message.chat.id,
+        message.message_id,
+        reply_markup=markup
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('page_'))
+def page_callback(call):
+    parts = call.data.split('_', 2)
+    service = parts[1]
+    page = int(parts[2])
+    user_id = call.from_user.id
+    if not hasattr(bot, 'catalog_states'):
+        bot.catalog_states = {}
+    bot.catalog_states[user_id] = {
+        'service': service,
+        'page': page
+    }
+    show_masters_page(call.message, user_id, service, page)
+    bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda call: call.data == 'cat_back_to_services')
+def back_to_services(call):
+    user_id = call.from_user.id
+    if hasattr(bot, 'catalog_states') and user_id in bot.catalog_states:
+        del bot.catalog_states[user_id]
+    cursor.execute("SELECT DISTINCT service FROM masters WHERE status = 'активен' ORDER BY service")
+    services = cursor.fetchall()
+    if not services:
+        bot.edit_message_text("❌ База мастеров пуста.", call.message.chat.id, call.message.message_id)
+        bot.answer_callback_query(call.id)
+        return
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    buttons = []
+    for s in services:
+        service = s[0]
+        buttons.append(types.InlineKeyboardButton(service, callback_data=f"cat_{service}"))
+    markup.add(*buttons)
+    markup.add(types.InlineKeyboardButton("❌ Отмена", callback_data="cat_cancel"))
+    bot.edit_message_text(
+        "🔍 **Каталог мастеров**\n\nВыберите специализацию:",
+        call.message.chat.id,
+        call.message.message_id,
+        reply_markup=markup
+    )
+    bot.answer_callback_query(call.id)
 
 # ================ ОБРАБОТЧИК НОВЫХ УЧАСТНИКОВ ЧАТА ================
 def is_new_member(chat_member_update):
