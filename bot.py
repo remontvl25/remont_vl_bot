@@ -38,8 +38,9 @@ if not TOKEN:
     print("❌ Токен не найден в переменных окружения!")
     sys.exit(1)
 
+# Для канала используем числовой ID (можно и строку с @)
+CHANNEL_ID = os.environ.get('CHANNEL_ID', '-1003711282924')  # ID канала
 CHAT_ID = os.environ.get('CHAT_ID', "@remontvl25chat")          # общий чат (пока оставляем)
-CHANNEL_LINK = os.environ.get('CHANNEL_LINK', "@remont_vl25")   # канал
 ADMIN_ID = int(os.environ.get('ADMIN_ID', '0'))
 MASTER_CHAT_ID = os.environ.get('MASTER_CHAT_ID', '@remontvl25masters')
 MASTER_CHAT_INVITE_LINK = os.environ.get('MASTER_CHAT_INVITE_LINK', '')
@@ -84,8 +85,11 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS reviews
                  master_name TEXT,
                  master_id INTEGER,
                  user_name TEXT,
+                 user_id INTEGER,
+                 anonymous INTEGER DEFAULT 0,
                  review_text TEXT,
                  rating INTEGER,
+                 media_file_id TEXT,
                  status TEXT DEFAULT 'pending',
                  created_at TEXT)''')
 
@@ -147,6 +151,7 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS recommendations
                  price_level TEXT,
                  satisfaction TEXT,
                  recommend TEXT,
+                 media_file_id TEXT,
                  status TEXT DEFAULT 'на модерации',
                  created_at TEXT)''')
 
@@ -159,6 +164,7 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS client_recommendations
                  hashtag TEXT,
                  contact TEXT,
                  description TEXT,
+                 media_file_id TEXT,
                  status TEXT DEFAULT 'new',
                  created_at TEXT)''')
 
@@ -187,6 +193,16 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS responses
                  price TEXT,
                  comment TEXT,
                  status TEXT DEFAULT 'pending',  -- pending, accepted, rejected
+                 created_at TEXT)''')
+
+# ----- Таблица запросов на подробности об отзыве -----
+cursor.execute('''CREATE TABLE IF NOT EXISTS review_questions
+                (id INTEGER PRIMARY KEY,
+                 review_id INTEGER,
+                 from_user_id INTEGER,
+                 from_username TEXT,
+                 question TEXT,
+                 answered INTEGER DEFAULT 0,
                  created_at TEXT)''')
 
 conn.commit()
@@ -459,20 +475,20 @@ def guest_register(message):
 def channel_link(message):
     if not only_private(message):
         return
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton(
-        "📢 Перейти в канал",
-        url="https://t.me/remont_vl25"
-    ))
+    try:
+        # Пытаемся получить информацию о канале
+        chat = bot.get_chat(int(CHANNEL_ID) if CHANNEL_ID.lstrip('-').isdigit() else CHANNEL_ID)
+        channel_name = chat.title or "канал"
+        link = f"https://t.me/{chat.username}" if chat.username else "канал"
+    except:
+        channel_name = "канал"
+        link = "канал"
     bot.send_message(
         message.chat.id,
-        f"📢 **Наш канал с мастерами:** {CHANNEL_LINK}\n\n"
-        "В канале вы найдете:\n"
-        "✅ Карточки мастеров с ценами, районами и отзывами\n"
-        "✅ Реальные цены на ремонт\n"
-        "✅ Фото работ до/после\n"
-        "✅ Чёрный список мошенников",
-        reply_markup=markup
+        f"📢 **Наш канал:** {link}\n\n"
+        "В канале публикуются только анонсы новых заявок, мастеров и отзывов.\n"
+        "Все подробности доступны в боте.",
+        parse_mode='Markdown'
     )
 
 # ================ КНОПКА "МОИ ЗАЯВКИ" ================
@@ -1397,25 +1413,24 @@ def promote_recommendation(message):
         return
     try:
         rec_id = int(message.text.split()[1])
-        cursor.execute('''
-            SELECT user_id, username, contact, description, hashtag
-            FROM client_recommendations WHERE id = ? AND status = 'approved'
-        ''', (rec_id,))
+        cursor.execute('SELECT * FROM client_recommendations WHERE id = ?', (rec_id,))
         rec = cursor.fetchone()
         if not rec:
-            bot.reply_to(message, "❌ Рекомендация не найдена или не одобрена.")
+            bot.reply_to(message, f"❌ Рекомендация с ID {rec_id} не найдена.")
             return
-        rec_user_id, rec_username, contact, desc, hashtag = rec
-
+        # rec: (id, user_id, username, message_id, hashtag, contact, description, media_file_id, status, created_at)
         name = f"Рекомендация #{rec_id}"
+        service = rec[4]  # hashtag
+        phone = rec[5]    # contact
+        description = rec[6]  # description
 
         cursor.execute('''INSERT INTO master_applications
                         (user_id, username, name, service, phone, districts, price_min, price_max,
                          experience, bio, portfolio, documents, entity_type, verification_type, source, status, created_at)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                        (rec_user_id, rec_username, name, hashtag, contact,
+                        (rec[1], rec[2], name, service, phone,
                          'Не указано', 'Не указано', 'Не указано',
-                         'Не указано', desc, '', 'Не указано',
+                         'Не указано', description, '', 'Не указано',
                          'individual', 'simple', 'recommendation',
                          'На проверке (из рекомендации)',
                          datetime.now().strftime("%d.%m.%Y %H:%M")))
@@ -1553,25 +1568,70 @@ def process_budget(message, service, description, district, date):
         'budget': budget
     }
 
-    # В новой системе не спрашиваем тип, всегда приватно (без публикации)
-    # Можно убрать выбор типа, либо оставить для будущего. Пока сохраняем как приватную (is_public=0)
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("🔓 Публичная (в канале)", callback_data="req_public"),
+        types.InlineKeyboardButton("🔒 Приватная (только мастерам)", callback_data="req_private")
+    )
+    bot.send_message(
+        message.chat.id,
+        "Выберите тип заявки:",
+        reply_markup=markup
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('req_'))
+def request_type_callback(call):
+    is_public = 1 if call.data == 'req_public' else 0
+    user_id = call.from_user.id
+    if user_id not in bot.request_temp:
+        bot.answer_callback_query(call.id, "❌ Ошибка, начните заново.")
+        return
+
     data = bot.request_temp[user_id]
-    data['is_public'] = 0
+    data['is_public'] = is_public
 
     # Сохраняем заявку в БД
     cursor.execute('''INSERT INTO requests 
                     (user_id, username, service, description, district, date, budget, status, is_public, created_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                     (user_id,
-                     message.from_user.username or "",
-                     service, description, district, date, budget,
-                     'активна', 0,
+                     call.from_user.username or "",
+                     data['service'], data['description'], data['district'], data['date'], data['budget'],
+                     'активна', is_public,
                      datetime.now().strftime("%d.%m.%Y %H:%M")))
     conn.commit()
     request_id = cursor.lastrowid
 
+    # Анонимный псевдоним для клиента
+    client_alias = f"Клиент #{request_id % 10000}"
+    request_text = f"""
+🆕 **НОВАЯ ЗАЯВКА!**
+
+👤 **От:** {client_alias}
+🔨 **Услуга:** {data['service']}
+📝 **Задача:** {data['description']}
+📍 **Район/ЖК:** {data['district']}
+📅 **Когда:** {data['date']}
+💰 **Бюджет:** {data['budget']}
+"""
+
+    # Публикуем в зависимости от типа
+    if is_public:
+        target_chat = int(CHANNEL_ID) if CHANNEL_ID.lstrip('-').isdigit() else CHANNEL_ID
+        extra_text = "\n📢 Публичная заявка. Мастера, откликнитесь в боте."
+    else:
+        target_chat = MASTER_CHAT_ID
+        extra_text = "\n🔒 Приватная заявка. Мастера, откликнитесь в боте."
+
+    request_text += extra_text
+
+    try:
+        bot.send_message(target_chat, request_text)
+    except Exception as e:
+        print(f"Ошибка публикации заявки: {e}")
+
     bot.send_message(
-        message.chat.id,
+        call.message.chat.id,
         "✅ **ЗАЯВКА СОЗДАНА!**\n\n"
         "Мы оповестили мастеров. Когда кто-то откликнется, вы получите уведомление."
     )
@@ -1579,8 +1639,9 @@ def process_budget(message, service, description, district, date):
     # Рассылаем уведомления мастерам (без контактов, с кнопкой отклика)
     notify_masters_about_new_request(request_id, data)
 
-    show_role_menu(message, 'client')
+    show_role_menu(call.message, 'client')
     del bot.request_temp[user_id]
+    bot.answer_callback_query(call.id)
 
 def notify_masters_about_new_request(request_id, request_data):
     service = request_data['service']
@@ -1924,12 +1985,12 @@ def choose_master_callback(call):
             except:
                 pass
             # Отправляем клиенту контакт мастера
-            master_contact = f"@{master_phone}"  # если телефон, лучше не показывать как юзернейм; но пока так
+            master_contact = f"{master_phone}"
             try:
                 bot.send_message(
                     client_user_id,
                     f"✅ Вы выбрали мастера {master_name} для заявки #{req_id}.\n"
-                    f"Контакт мастера: {master_phone} (свяжитесь с ним)."
+                    f"Контакт мастера: {master_contact} (свяжитесь с ним)."
                 )
             except:
                 pass
@@ -1941,7 +2002,7 @@ def choose_master_callback(call):
     )
     bot.answer_callback_query(call.id)
 
-# ================ УЛУЧШЕННЫЕ ОТЗЫВЫ (С ВЫБОРОМ МАСТЕРА) ================
+# ================ УЛУЧШЕННЫЕ ОТЗЫВЫ (С ВЫБОРОМ МАСТЕРА, АНОНИМНОСТЬЮ И МЕДИА) ================
 if not hasattr(bot, 'review_data'):
     bot.review_data = {}
 
@@ -1954,7 +2015,14 @@ def add_review(message):
     cursor.execute("SELECT DISTINCT service FROM masters WHERE status = 'активен' ORDER BY service")
     services = cursor.fetchall()
     if not services:
-        bot.send_message(message.chat.id, "❌ В базе пока нет мастеров.")
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("📝 Оставить рекомендацию в чате", callback_data="recommend_in_chat"))
+        bot.send_message(
+            message.chat.id,
+            "❌ В базе пока нет мастеров.\n\n"
+            "Вы можете оставить рекомендацию о мастере в нашем чате @remontvl25chat, используя хештег #рекомендую_...",
+            reply_markup=markup
+        )
         return
     markup = types.InlineKeyboardMarkup(row_width=2)
     buttons = []
@@ -2013,28 +2081,73 @@ def process_review_text(message, master_id):
     user_id = message.from_user.id
     bot.review_data[user_id]['text'] = review_text
 
+    # Спрашиваем, анонимный ли отзыв
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("✅ Да, анонимно", callback_data="rev_anon_yes"),
+        types.InlineKeyboardButton("❌ Нет, указать автора", callback_data="rev_anon_no")
+    )
+    bot.send_message(
+        message.chat.id,
+        "🔒 **Оставить отзыв анонимно?**\n"
+        "(Если да, ваше имя/username не будет показано в публикации.)",
+        reply_markup=markup
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('rev_anon_'))
+def rev_anon_callback(call):
+    anon = 1 if call.data == 'rev_anon_yes' else 0
+    user_id = call.from_user.id
+    bot.review_data[user_id]['anonymous'] = anon
+
+    bot.edit_message_text(
+        "📸 **Прикрепите фото или видео (необязательно).**\n"
+        "Если хотите поделиться медиа, отправьте его сейчас.\n"
+        "Если нет, отправьте /skip.",
+        call.message.chat.id,
+        call.message.message_id
+    )
+    bot.register_next_step_handler(call.message, process_review_media, user_id)
+    bot.answer_callback_query(call.id)
+
+def process_review_media(message, user_id):
+    media_file_id = None
+    if message.text and message.text == '/skip':
+        media_file_id = ''
+    elif message.photo:
+        # Берём самое большое фото
+        media_file_id = message.photo[-1].file_id
+    elif message.video:
+        media_file_id = message.video.file_id
+    else:
+        bot.send_message(message.chat.id, "Пожалуйста, отправьте фото, видео или /skip.")
+        bot.register_next_step_handler(message, process_review_media, user_id)
+        return
+
+    bot.review_data[user_id]['media'] = media_file_id
+
     markup = types.InlineKeyboardMarkup(row_width=5)
     buttons = []
     for i in range(1, 6):
         buttons.append(types.InlineKeyboardButton(
-            "⭐" * i, callback_data=f"rev_rate_{master_id}_{i}"
+            "⭐" * i, callback_data=f"rev_rate_{i}"
         ))
     markup.add(*buttons)
     bot.send_message(
         message.chat.id,
-        f"👤 **Мастер:** ...\n"
-        f"📝 **Отзыв:** {review_text}\n\n"
         "⭐ **Оцените работу от 1 до 5:**",
         reply_markup=markup
     )
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('rev_rate_'))
 def rev_rate_callback(call):
-    parts = call.data.split('_')
-    master_id = int(parts[2])
-    rating = int(parts[3])
+    rating = int(call.data.split('_')[2])
     user_id = call.from_user.id
-    review_text = bot.review_data[user_id]['text']
+    data = bot.review_data[user_id]
+    master_id = data['master_id']
+    review_text = data['text']
+    anonymous = data['anonymous']
+    media_file_id = data.get('media', '')
 
     # Получаем данные мастера
     cursor.execute('SELECT name FROM masters WHERE id = ?', (master_id,))
@@ -2045,12 +2158,15 @@ def rev_rate_callback(call):
     master_name = master[0]
 
     cursor.execute('''INSERT INTO reviews
-                    (master_name, master_id, user_name, review_text, rating, status, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                    (master_name, master_id, user_name, user_id, anonymous, review_text, rating, media_file_id, status, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                     (master_name, master_id,
                      call.from_user.username or call.from_user.first_name,
+                     user_id,
+                     anonymous,
                      review_text,
                      rating,
+                     media_file_id,
                      'pending',  # на модерацию
                      datetime.now().strftime("%d.%m.%Y %H:%M")))
     conn.commit()
@@ -2062,7 +2178,8 @@ def rev_rate_callback(call):
 👤 **Мастер:** {master_name}
 ⭐ **Оценка:** {'⭐' * rating}
 📝 **Отзыв:** {review_text}
-👤 **От кого:** @{call.from_user.username or "нет"}
+👤 **От кого:** @{call.from_user.username or "нет"} ({"анонимно" if anonymous else "публично"})
+📎 **Медиа:** {'есть' if media_file_id else 'нет'}
 ✅ Одобрить: /approve_review {review_id}
 ❌ Отклонить: /reject_review {review_id}
     """
@@ -2101,6 +2218,11 @@ def rev_cancel(call):
     bot.edit_message_text("❌ Отмена.", call.message.chat.id, call.message.message_id)
     bot.answer_callback_query(call.id)
 
+@bot.callback_query_handler(func=lambda call: call.data == 'recommend_in_chat')
+def recommend_in_chat(call):
+    bot.answer_callback_query(call.id)
+    bot.send_message(call.message.chat.id, "Перейдите в чат @remontvl25chat и напишите сообщение с хештегом #рекомендую_...")
+
 # ================ АДМИН-КОМАНДЫ ДЛЯ ОТЗЫВОВ ================
 @bot.message_handler(commands=['approve_review'])
 def approve_review(message):
@@ -2113,23 +2235,26 @@ def approve_review(message):
         conn.commit()
         # Получаем данные отзыва для публикации в канале
         cursor.execute('''
-            SELECT master_name, user_name, review_text, rating, created_at
+            SELECT master_name, user_name, anonymous, review_text, rating, media_file_id, created_at
             FROM reviews WHERE id = ?
         ''', (review_id,))
         rev = cursor.fetchone()
         if rev:
-            master_name, user_name, review_text, rating, created_at = rev
-            # Публикуем в канале
+            master_name, user_name, anonymous, review_text, rating, media_file_id, created_at = rev
+            # Формируем текст публикации
+            author = "Анонимный пользователь" if anonymous else f"@{user_name}"
             review_public = f"""
 ⭐ **НОВЫЙ ОТЗЫВ!**
 
 👤 **Мастер:** {master_name}
 ⭐ **Оценка:** {'⭐' * rating}
 📝 **Отзыв:** {review_text}
-👤 **От кого:** @{user_name}
+👤 **От:** {author}
 ⏰ {created_at}
 """
-            bot.send_message(CHANNEL_LINK, review_public)
+            if media_file_id:
+                review_public += "\n📎 **Прикреплено фото/видео.** Для просмотра нажмите /view_review_media {review_id} в боте."
+            bot.send_message(CHANNEL_ID, review_public)
         bot.reply_to(message, f"✅ Отзыв {review_id} одобрен и опубликован.")
     except Exception as e:
         bot.reply_to(message, f"❌ Ошибка: {e}")
@@ -2144,6 +2269,23 @@ def reject_review(message):
         cursor.execute('UPDATE reviews SET status = "rejected" WHERE id = ?', (review_id,))
         conn.commit()
         bot.reply_to(message, f"❌ Отзыв {review_id} отклонён.")
+    except Exception as e:
+        bot.reply_to(message, f"❌ Ошибка: {e}")
+
+@bot.message_handler(commands=['view_review_media'])
+def view_review_media(message):
+    if not only_private(message):
+        return
+    try:
+        review_id = int(message.text.split()[1])
+        cursor.execute('SELECT media_file_id FROM reviews WHERE id = ?', (review_id,))
+        media = cursor.fetchone()
+        if not media or not media[0]:
+            bot.reply_to(message, "❌ Медиа не найдено.")
+            return
+        file_id = media[0]
+        bot.send_message(message.chat.id, "📎 Вот медиа:")
+        bot.send_photo(message.chat.id, file_id)  # или send_video
     except Exception as e:
         bot.reply_to(message, f"❌ Ошибка: {e}")
 
@@ -2183,7 +2325,10 @@ def publish_master_card(master_data, master_id=None):
         callback_data=f"request_to_master_{master_id}"
     ))
     try:
-        sent = bot.send_message(CHANNEL_LINK, card, reply_markup=markup)
+        # Публикуем в канале только анонс, полная карточка в боте
+        short = f"👷 **Новый мастер**: {master_data['name']} ({master_data['service']})\nПодробности в боте: @remont_vl25_chat_bot"
+        sent = bot.send_message(CHANNEL_ID, short)
+        # Также можно отправить полную карточку куда-то ещё, но оставим так
         print(f"✅ Карточка мастера {master_data['name']} опубликована в канале, message_id={sent.message_id}")
         if master_id:
             cursor.execute('UPDATE masters SET channel_message_id = ? WHERE id = ?', (sent.message_id, master_id))
@@ -2263,7 +2408,7 @@ def approve_master(message):
             bot.send_message(
                 app[1],
                 f"✅ **ВАША АНКЕТА ОДОБРЕНА!**\n\n"
-                f"Поздравляем! Ваша карточка уже опубликована в канале {CHANNEL_LINK}\n\n"
+                f"Поздравляем! Ваша карточка уже опубликована в канале {CHANNEL_ID}\n\n"
                 f"📌 **Что дальше?**\n"
                 f"1. Клиенты будут видеть вашу карточку и смогут оставлять заявки.\n"
                 f"2. Вы получите уведомление, когда кто-то оставит заявку по вашей специализации.\n"
@@ -2720,6 +2865,54 @@ def back_to_services(call):
     )
     bot.answer_callback_query(call.id)
 
+@bot.callback_query_handler(func=lambda call: call.data == 'create_request')
+def create_request_callback(call):
+    bot.answer_callback_query(call.id)
+    bot.send_message(call.message.chat.id, "🔨 Переходим к созданию заявки.")
+    request_service(call.message)
+
+# ================ АДМИН-МЕНЮ ================
+@bot.message_handler(commands=['admin'])
+def admin_command(message):
+    if message.from_user.id != ADMIN_ID:
+        bot.reply_to(message, "❌ У вас нет прав.")
+        return
+    admin_menu(message)
+
+def admin_menu(message):
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("📋 Список мастеров", callback_data="admin_list_masters"),
+        types.InlineKeyboardButton("📋 Новые анкеты", callback_data="admin_list_applications"),
+        types.InlineKeyboardButton("📋 Рекомендации", callback_data="admin_list_recs"),
+        types.InlineKeyboardButton("📋 Отзывы", callback_data="admin_list_reviews"),
+        types.InlineKeyboardButton("➕ Одобрить мастера", callback_data="admin_approve_prompt"),
+        types.InlineKeyboardButton("❌ Отклонить", callback_data="admin_reject_prompt")
+    )
+    bot.send_message(message.chat.id, "👑 Админ-панель", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('admin_'))
+def admin_callback(call):
+    if call.from_user.id != ADMIN_ID:
+        bot.answer_callback_query(call.id, "❌ Нет прав")
+        return
+    action = call.data[6:]
+    if action == 'list_masters':
+        list_masters(call.message)
+    elif action == 'list_applications':
+        # Нужна команда для списка анкет на проверку – можно сделать
+        bot.send_message(call.message.chat.id, "Используйте /list_apps")
+    elif action == 'list_recs':
+        list_recommendations(call.message)
+    elif action == 'list_reviews':
+        # команда для списка отзывов на модерацию
+        bot.send_message(call.message.chat.id, "Используйте /list_reviews")
+    elif action == 'approve_prompt':
+        bot.send_message(call.message.chat.id, "Введите ID анкеты для одобрения: /approve [ID]")
+    elif action == 'reject_prompt':
+        bot.send_message(call.message.chat.id, "Введите ID анкеты и причину: /reject [ID] [причина]")
+    bot.answer_callback_query(call.id)
+
 # ================ ОБРАБОТЧИК НОВЫХ УЧАСТНИКОВ ЧАТА ================
 def is_new_member(chat_member_update):
     old_status = chat_member_update.old_chat_member.status
@@ -2776,7 +2969,7 @@ if __name__ == '__main__':
     print("✅ Бот запускается...")
     print(f"🤖 Токен: {TOKEN[:10]}...")
     print(f"💬 Общий чат: {CHAT_ID}")
-    print(f"📢 Канал: {CHANNEL_LINK}")
+    print(f"📢 Канал: {CHANNEL_ID}")
     print(f"🔐 Чат мастеров: {MASTER_CHAT_ID}")
     print(f"👑 Админ ID: {ADMIN_ID}")
     print("=" * 60)
