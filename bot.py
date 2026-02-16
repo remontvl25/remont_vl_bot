@@ -1413,24 +1413,22 @@ def promote_recommendation(message):
         return
     try:
         rec_id = int(message.text.split()[1])
-        cursor.execute('SELECT * FROM client_recommendations WHERE id = ?', (rec_id,))
+        cursor.execute('SELECT user_id, username, contact, description, hashtag FROM client_recommendations WHERE id = ?', (rec_id,))
         rec = cursor.fetchone()
         if not rec:
             bot.reply_to(message, f"❌ Рекомендация с ID {rec_id} не найдена.")
             return
-        # rec: (id, user_id, username, message_id, hashtag, contact, description, media_file_id, status, created_at)
+        user_id, username, contact, desc, hashtag = rec
         name = f"Рекомендация #{rec_id}"
-        service = rec[4]  # hashtag
-        phone = rec[5]    # contact
-        description = rec[6]  # description
+        service = hashtag  # хештег хранит специализацию
 
         cursor.execute('''INSERT INTO master_applications
                         (user_id, username, name, service, phone, districts, price_min, price_max,
                          experience, bio, portfolio, documents, entity_type, verification_type, source, status, created_at)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                        (rec[1], rec[2], name, service, phone,
+                        (user_id, username, name, service, contact,
                          'Не указано', 'Не указано', 'Не указано',
-                         'Не указано', description, '', 'Не указано',
+                         'Не указано', desc, '', 'Не указано',
                          'individual', 'simple', 'recommendation',
                          'На проверке (из рекомендации)',
                          datetime.now().strftime("%d.%m.%Y %H:%M")))
@@ -1439,7 +1437,7 @@ def promote_recommendation(message):
         bot.reply_to(message, f"✅ Создана анкета мастера (ID {app_id}) из рекомендации. Теперь вы можете отредактировать её командой /approve {app_id} или отклонить /reject.")
     except Exception as e:
         bot.reply_to(message, f"❌ Ошибка: {e}")
-
+        
 # ================ КОМАНДЫ ДЛЯ ПЛАТНОЙ ПОДПИСКИ (пока не используются) ================
 @bot.message_handler(commands=['subscribe'])
 def subscribe(message):
