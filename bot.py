@@ -38,8 +38,8 @@ if not TOKEN:
     print("❌ Токен не найден в переменных окружения!")
     sys.exit(1)
 
-CHANNEL_ID = os.environ.get('CHANNEL_ID', '-1003711282924')
-CHAT_ID = os.environ.get('CHAT_ID', "@remontvl25chat")
+CHANNEL_ID = os.environ.get('CHANNEL_ID', '-1003711282924')  # ID канала (числовой)
+CHAT_ID = os.environ.get('CHAT_ID', "@remontvl25chat")          # общий чат
 ADMIN_ID = int(os.environ.get('ADMIN_ID', '0'))
 MASTER_CHAT_ID = os.environ.get('MASTER_CHAT_ID', '@remontvl25masters')
 MASTER_CHAT_INVITE_LINK = os.environ.get('MASTER_CHAT_INVITE_LINK', '')
@@ -48,10 +48,12 @@ GOOGLE_FORMS_BASE = os.environ.get('GOOGLE_FORMS_BASE', '')
 FORM_ENTRY_TG_ID = os.environ.get('FORM_ENTRY_TG_ID', '')
 FORM_ENTRY_TG_USERNAME = os.environ.get('FORM_ENTRY_TG_USERNAME', '')
 
+# Путь к базе данных (подготовка к Volume)
+DB_PATH = os.environ.get('DB_PATH', 'remont.db')
+
 bot = telebot.TeleBot(TOKEN)
 
-# ================ БАЗА ДАННЫХ (с поддержкой Volume) ================
-DB_PATH = os.environ.get('DB_PATH', 'remont.db')
+# ================ БАЗА ДАННЫХ ================
 conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 cursor = conn.cursor()
 
@@ -81,10 +83,10 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS requests
 # ----- Таблица отзывов -----
 cursor.execute('''CREATE TABLE IF NOT EXISTS reviews
                 (id INTEGER PRIMARY KEY,
-                 master_name TEXT,
                  master_id INTEGER,
-                 user_name TEXT,
+                 master_name TEXT,
                  user_id INTEGER,
+                 user_name TEXT,
                  anonymous INTEGER DEFAULT 0,
                  review_text TEXT,
                  rating INTEGER,
@@ -188,10 +190,10 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS rec_comments
 cursor.execute('''CREATE TABLE IF NOT EXISTS responses
                 (id INTEGER PRIMARY KEY,
                  request_id INTEGER,
-                 master_id INTEGER,
+                 master_id INTEGER,          -- id из таблицы masters
                  price TEXT,
                  comment TEXT,
-                 status TEXT DEFAULT 'pending',
+                 status TEXT DEFAULT 'pending',  -- pending, accepted, rejected
                  created_at TEXT)''')
 
 # ----- Таблица запросов на подробности об отзыве -----
@@ -1613,6 +1615,7 @@ def request_type_callback(call):
     data = bot.request_temp[user_id]
     data['is_public'] = is_public
 
+    # Сохраняем заявку в БД
     cursor.execute('''INSERT INTO requests 
                     (user_id, username, service, description, district, date, budget, status, is_public, created_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
@@ -1624,6 +1627,7 @@ def request_type_callback(call):
     conn.commit()
     request_id = cursor.lastrowid
 
+    # Анонимный псевдоним для клиента
     client_alias = f"Клиент #{request_id % 10000}"
     request_text = f"""
 🆕 **НОВАЯ ЗАЯВКА!**
@@ -1653,6 +1657,7 @@ def request_type_callback(call):
 
     try:
         bot.send_message(target_chat, request_text, reply_markup=markup)
+        # Если заявка публичная, дублируем в мастер-чат
         if is_public:
             bot.send_message(MASTER_CHAT_ID, request_text, reply_markup=markup)
     except Exception as e:
@@ -1668,6 +1673,7 @@ def request_type_callback(call):
         )
     )
 
+    # Рассылаем уведомления мастерам (без контактов, с кнопкой отклика)
     notify_masters_about_new_request(request_id, data)
 
     show_role_menu(call.message, 'client')
@@ -1718,6 +1724,13 @@ def request_to_master_callback(call):
         return
     master_user_id, service = master
     user_id = call.from_user.id
+
+    # Проверяем, что пользователь – клиент
+    cursor.execute('SELECT role FROM users WHERE user_id = ?', (user_id,))
+    row = cursor.fetchone()
+    if not row or row[0] != 'client':
+        bot.answer_callback_query(call.id, "❌ Только клиенты могут оставлять заявки.")
+        return
 
     if not hasattr(bot, 'request_data'):
         bot.request_data = {}
@@ -1970,6 +1983,7 @@ def my_requests(message):
         else:
             text += "😴 Пока нет откликов.\n"
 
+        # Если заявка публичная – добавляем кнопку рекомендаций
         if is_public:
             markup.add(types.InlineKeyboardButton(
                 "👥 Рекомендации других клиентов",
@@ -1995,6 +2009,7 @@ def choose_master_callback(call):
     cursor.execute('UPDATE responses SET status = "accepted" WHERE id = ?', (resp_id,))
     conn.commit()
 
+    # Получаем данные мастера
     cursor.execute('SELECT user_id, name, phone FROM masters WHERE id = ?', (master_db_id,))
     master = cursor.fetchone()
     if master:
@@ -2004,12 +2019,14 @@ def choose_master_callback(call):
         master_username = user_row[0] if user_row else None
         master_contact = f"@{master_username}" if master_username else master_phone
 
+        # Данные клиента
         cursor.execute('SELECT user_id, username FROM requests WHERE id = ?', (req_id,))
         client = cursor.fetchone()
         if client:
             client_user_id, client_username = client
             client_contact = f"@{client_username}" if client_username else f"ID {client_user_id}"
 
+            # Отправляем мастеру контакт клиента
             try:
                 bot.send_message(
                     master_user_id,
@@ -2020,6 +2037,7 @@ def choose_master_callback(call):
             except:
                 pass
 
+            # Отправляем клиенту контакт мастера
             try:
                 bot.send_message(
                     client_user_id,
@@ -2029,6 +2047,7 @@ def choose_master_callback(call):
             except:
                 pass
 
+    # Уведомляем других мастеров о закрытии заявки
     cursor.execute('SELECT master_id FROM responses WHERE request_id = ? AND id != ? AND status = "pending"', (req_id, resp_id))
     other_responses = cursor.fetchall()
     for (other_master_db_id,) in other_responses:
@@ -2051,6 +2070,7 @@ def choose_master_callback(call):
 @bot.callback_query_handler(func=lambda call: call.data.startswith('recs_for_request_'))
 def show_recs_for_request(call):
     req_id = int(call.data.split('_')[3])
+    # Получаем специализацию заявки
     cursor.execute('SELECT service, is_public FROM requests WHERE id = ?', (req_id,))
     row = cursor.fetchone()
     if not row:
@@ -2128,6 +2148,14 @@ if not hasattr(bot, 'review_data'):
 def add_review(message):
     if not only_private(message):
         return
+    # Проверяем, что пользователь – клиент
+    user_id = message.from_user.id
+    cursor.execute('SELECT role FROM users WHERE user_id = ?', (user_id,))
+    row = cursor.fetchone()
+    if not row or row[0] != 'client':
+        bot.send_message(message.chat.id, "❌ Только клиенты могут оставлять отзывы.")
+        return
+
     cursor.execute("SELECT DISTINCT service FROM masters WHERE status = 'активен' ORDER BY service")
     services = cursor.fetchall()
     if not services:
@@ -2262,19 +2290,27 @@ def rev_rate_callback(call):
     anonymous = data['anonymous']
     media_file_id = data.get('media', '')
 
-    cursor.execute('SELECT name FROM masters WHERE id = ?', (master_id,))
+    # Проверяем, что клиент действительно выбирал этого мастера
+    cursor.execute('''
+        SELECT id FROM requests 
+        WHERE user_id = ? AND chosen_master_id = ? AND status = 'активна'
+    ''', (user_id, master_id))
+    if not cursor.fetchone():
+        bot.answer_callback_query(call.id, "❌ Вы не воспользовались услугами этого мастера через наш сервис.")
+        return
+
+    cursor.execute('SELECT name, service, districts FROM masters WHERE id = ?', (master_id,))
     master = cursor.fetchone()
     if not master:
         bot.answer_callback_query(call.id, "❌ Мастер не найден.")
         return
-    master_name = master[0]
+    master_name, master_service, master_districts = master
 
     cursor.execute('''INSERT INTO reviews
-                    (master_name, master_id, user_name, user_id, anonymous, review_text, rating, media_file_id, status, created_at)
+                    (master_id, master_name, user_id, user_name, anonymous, review_text, rating, media_file_id, status, created_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                    (master_name, master_id,
+                    (master_id, master_name, user_id,
                      call.from_user.username or call.from_user.first_name,
-                     user_id,
                      anonymous,
                      review_text,
                      rating,
@@ -2284,9 +2320,10 @@ def rev_rate_callback(call):
     conn.commit()
     review_id = cursor.lastrowid
 
+    # Уведомление админу с возможностью просмотра медиа
     admin_msg = f"""
 ⭐ **НОВЫЙ ОТЗЫВ (на модерации)!** (ID: {review_id})
-👤 **Мастер:** {master_name}
+👤 **Мастер:** {master_name} (специализация: {master_service}, районы: {master_districts})
 ⭐ **Оценка:** {'⭐' * rating}
 📝 **Отзыв:** {review_text}
 👤 **От кого:** @{call.from_user.username or "нет"} ({"анонимно" if anonymous else "публично"})
@@ -2294,6 +2331,8 @@ def rev_rate_callback(call):
 ✅ Одобрить: /approve_review {review_id}
 ❌ Отклонить: /reject_review {review_id}
     """
+    if media_file_id:
+        admin_msg += f"\n👁️ Посмотреть медиа: /view_review_media {review_id}"
     try:
         if ADMIN_ID != 0:
             bot.send_message(ADMIN_ID, admin_msg)
@@ -2345,25 +2384,32 @@ def approve_review(message):
         cursor.execute('UPDATE reviews SET status = "published" WHERE id = ?', (review_id,))
         conn.commit()
         cursor.execute('''
-            SELECT master_name, user_name, anonymous, review_text, rating, media_file_id, created_at
+            SELECT master_id, user_name, anonymous, review_text, rating, media_file_id, created_at
             FROM reviews WHERE id = ?
         ''', (review_id,))
         rev = cursor.fetchone()
         if rev:
-            master_name, user_name, anonymous, review_text, rating, media_file_id, created_at = rev
+            master_id, user_name, anonymous, review_text, rating, media_file_id, created_at = rev
             author = "Анонимный пользователь" if anonymous else f"@{user_name}"
-            review_public = f"""
+            # Получаем данные мастера
+            cursor.execute('SELECT name, service, districts FROM masters WHERE id = ?', (master_id,))
+            master = cursor.fetchone()
+            if master:
+                master_name, master_service, master_districts = master
+                review_public = f"""
 ⭐ **НОВЫЙ ОТЗЫВ!**
 
 👤 **Мастер:** {master_name}
+🔧 **Специализация:** {master_service}
+📍 **Районы:** {master_districts}
 ⭐ **Оценка:** {'⭐' * rating}
 📝 **Отзыв:** {review_text}
 👤 **От:** {author}
 ⏰ {created_at}
 """
-            if media_file_id:
-                review_public += "\n📎 **Прикреплено фото/видео.** Для просмотра нажмите /view_review_media {review_id} в боте."
-            bot.send_message(CHANNEL_ID, review_public)
+                if media_file_id:
+                    review_public += "\n📎 **Прикреплено фото/видео.** Для просмотра нажмите /view_review_media {review_id} в боте."
+                bot.send_message(CHANNEL_ID, review_public)
         bot.reply_to(message, f"✅ Отзыв {review_id} одобрен и опубликован.")
     except Exception as e:
         bot.reply_to(message, f"❌ Ошибка: {e}")
@@ -2398,7 +2444,7 @@ def view_review_media(message):
     except Exception as e:
         bot.reply_to(message, f"❌ Ошибка: {e}")
 
-# ================ ПУБЛИКАЦИЯ КАРТОЧКИ МАСТЕРА (с кнопкой прямой заявки) ================
+# ================ ПУБЛИКАЦИЯ КАРТОЧКИ МАСТЕРА (с кнопками заявки и отзыва) ================
 def publish_master_card(master_data, master_id=None):
     if master_data.get('entity_type') == 'company':
         type_icon = '🏢'
@@ -2433,6 +2479,10 @@ def publish_master_card(master_data, master_id=None):
         "📩 Оставить заявку этому мастеру",
         callback_data=f"request_to_master_{master_id}"
     ))
+    markup.add(types.InlineKeyboardButton(
+        "⭐ Оставить отзыв этому мастеру",
+        callback_data=f"review_for_master_{master_id}"
+    ))
     try:
         sent = bot.send_message(CHANNEL_ID, card, reply_markup=markup)
         if master_id:
@@ -2442,6 +2492,37 @@ def publish_master_card(master_data, master_id=None):
     except Exception as e:
         print(f"❌ Ошибка публикации карточки: {e}")
         return None
+
+# ================ КНОПКА ОТЗЫВА ИЗ КАРТОЧКИ ================
+@bot.callback_query_handler(func=lambda call: call.data.startswith('review_for_master_'))
+def review_for_master_callback(call):
+    master_id = int(call.data.split('_')[3])
+    # Проверяем, что пользователь – клиент
+    user_id = call.from_user.id
+    cursor.execute('SELECT role FROM users WHERE user_id = ?', (user_id,))
+    row = cursor.fetchone()
+    if not row or row[0] != 'client':
+        bot.answer_callback_query(call.id, "❌ Только клиенты могут оставлять отзывы.")
+        return
+    # Проверяем, что клиент действительно воспользовался услугами этого мастера
+    cursor.execute('''
+        SELECT id FROM requests 
+        WHERE user_id = ? AND chosen_master_id = ? AND status = 'активна'
+    ''', (user_id, master_id))
+    if not cursor.fetchone():
+        bot.answer_callback_query(call.id, "❌ Вы не воспользовались услугами этого мастера через наш сервис.")
+        return
+    # Запускаем процесс отзыва с предвыбранным мастером
+    if not hasattr(bot, 'review_data'):
+        bot.review_data = {}
+    bot.review_data[user_id] = {'master_id': master_id}
+    bot.edit_message_text(
+        "📝 **Напишите текст отзыва:**",
+        call.message.chat.id,
+        call.message.message_id
+    )
+    bot.register_next_step_handler(call.message, process_review_text, master_id)
+    bot.answer_callback_query(call.id)
 
 # ================ КОМАНДЫ АДМИНИСТРАТОРА ДЛЯ МАСТЕРОВ ================
 @bot.message_handler(commands=['approve'])
