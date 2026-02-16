@@ -2325,11 +2325,8 @@ def publish_master_card(master_data, master_id=None):
         callback_data=f"request_to_master_{master_id}"
     ))
     try:
-        # Публикуем в канале только анонс, полная карточка в боте
-        short = f"👷 **Новый мастер**: {master_data['name']} ({master_data['service']})\nПодробности в боте: @remont_vl25_chat_bot"
-        sent = bot.send_message(CHANNEL_ID, short)
-        # Также можно отправить полную карточку куда-то ещё, но оставим так
-        print(f"✅ Карточка мастера {master_data['name']} опубликована в канале, message_id={sent.message_id}")
+        # Публикуем полную карточку в канале
+        sent = bot.send_message(CHANNEL_ID, card, reply_markup=markup)
         if master_id:
             cursor.execute('UPDATE masters SET channel_message_id = ? WHERE id = ?', (sent.message_id, master_id))
             conn.commit()
