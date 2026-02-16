@@ -1019,6 +1019,14 @@ if not hasattr(bot, 'recommend_data'):
 def recommend_master(message):
     if not only_private(message):
         return
+    # Проверяем, что пользователь имеет роль клиента
+    user_id = message.from_user.id
+    cursor.execute('SELECT role FROM users WHERE user_id = ?', (user_id,))
+    row = cursor.fetchone()
+    if not row or row[0] != 'client':
+        bot.send_message(message.chat.id, "❌ Только клиенты могут рекомендовать мастеров.")
+        return
+
     msg = bot.send_message(
         message.chat.id,
         "👍 **РЕКОМЕНДАЦИЯ МАСТЕРА**\n\n"
@@ -1286,6 +1294,19 @@ def handle_chat_recommendations(message):
     if not match:
         return
     hashtag = match.group(1).lower()
+
+    # Проверяем роль пользователя
+    user_id = message.from_user.id
+    cursor.execute('SELECT role FROM users WHERE user_id = ?', (user_id,))
+    row = cursor.fetchone()
+    if not row or row[0] != 'client':
+        # Не клиент – удаляем сообщение (если бот админ) и игнорируем
+        try:
+            bot.delete_message(message.chat.id, message.message_id)
+        except:
+            pass
+        return
+
     if re.match(r'^\s*#рекомендую_\S+\s*$', text):
         show_recommendations_by_hashtag(message, hashtag)
         return
@@ -1423,7 +1444,7 @@ def promote_recommendation(message):
             return
         user_id, username, contact, desc, hashtag = rec
         name = f"Рекомендация #{rec_id}"
-        service = hashtag  # хештег хранит специализацию
+        service = hashtag
 
         cursor.execute('''INSERT INTO master_applications
                         (user_id, username, name, service, phone, districts, price_min, price_max,
@@ -1642,7 +1663,11 @@ def request_type_callback(call):
     bot.send_message(
         call.message.chat.id,
         "✅ **ЗАЯВКА СОЗДАНА!**\n\n"
-        "Мы оповестили мастеров. Когда кто-то откликнется, вы получите уведомление."
+        "Мы оповестили мастеров. Когда кто-то откликнется, вы получите уведомление.\n\n"
+        "Если никто не откликнется, вы можете посмотреть рекомендации других клиентов:",
+        reply_markup=types.InlineKeyboardMarkup().add(
+            types.InlineKeyboardButton("👥 Рекомендации мастеров", callback_data=f"show_recs_{data['service']}")
+        )
     )
 
     # Рассылаем уведомления мастерам (без контактов, с кнопкой отклика)
@@ -1913,7 +1938,7 @@ def my_requests(message):
         return
     user_id = message.from_user.id
     cursor.execute('''
-        SELECT id, service, description, district, date, budget, status
+        SELECT id, service, description, district, date, budget, status, is_public
         FROM requests
         WHERE user_id = ? AND status = 'активна' AND chosen_master_id IS NULL
         ORDER BY created_at DESC
@@ -1924,7 +1949,7 @@ def my_requests(message):
         return
 
     for req in requests:
-        req_id, service, desc, district, date, budget, status = req
+        req_id, service, desc, district, date, budget, status, is_public = req
         cursor.execute('''
             SELECT r.id, m.name, r.price, r.comment
             FROM responses r
@@ -1934,9 +1959,10 @@ def my_requests(message):
         responses = cursor.fetchall()
 
         text = f"📌 **Заявка #{req_id}**\n🔨 {service}\n📍 {district}\n📅 {date}\n💰 {budget}\n📝 {desc}\n\n"
+        markup = types.InlineKeyboardMarkup()
+
         if responses:
             text += "**Отклики:**\n"
-            markup = types.InlineKeyboardMarkup()
             for resp in responses:
                 resp_id, master_name, price, comment = resp
                 text += f"• {master_name}: {price}\n  {comment[:50]}...\n"
@@ -1944,10 +1970,17 @@ def my_requests(message):
                     f"✅ Выбрать {master_name}",
                     callback_data=f"choose_master_{req_id}_{resp_id}"
                 ))
-            bot.send_message(message.chat.id, text, reply_markup=markup)
         else:
-            text += "😴 Пока нет откликов."
-            bot.send_message(message.chat.id, text)
+            text += "😴 Пока нет откликов.\n"
+
+        # Если заявка публичная – добавляем кнопку рекомендаций
+        if is_public:
+            markup.add(types.InlineKeyboardButton(
+                "👥 Рекомендации других клиентов",
+                callback_data=f"recs_for_request_{req_id}"
+            ))
+
+        bot.send_message(message.chat.id, text, reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('choose_master_'))
 def choose_master_callback(call):
@@ -2018,6 +2051,50 @@ def choose_master_callback(call):
 
     bot.edit_message_text(
         "✅ Вы выбрали мастера. Контакты отправлены обоим.",
+        call.message.chat.id,
+        call.message.message_id
+    )
+    bot.answer_callback_query(call.id)
+
+# ================ ПОКАЗ РЕКОМЕНДАЦИЙ ДЛЯ ЗАЯВКИ ================
+@bot.callback_query_handler(func=lambda call: call.data.startswith('recs_for_request_'))
+def show_recs_for_request(call):
+    req_id = int(call.data.split('_')[3])
+    # Получаем специализацию заявки
+    cursor.execute('SELECT service, is_public FROM requests WHERE id = ?', (req_id,))
+    row = cursor.fetchone()
+    if not row:
+        bot.answer_callback_query(call.id, "❌ Заявка не найдена.")
+        return
+    service, is_public = row
+    if not is_public:
+        bot.answer_callback_query(call.id, "❌ Рекомендации доступны только для публичных заявок.")
+        return
+
+    cursor.execute('''
+        SELECT master_name, contact, description, created_at
+        FROM client_recommendations
+        WHERE hashtag = ? AND status = 'approved'
+        ORDER BY created_at DESC
+        LIMIT 10
+    ''', (service,))
+    recs = cursor.fetchall()
+    if not recs:
+        bot.edit_message_text(
+            f"❌ По услуге {service} пока нет рекомендаций.\n\n"
+            "Вы можете оставить свою рекомендацию в нашем чате @remontvl25chat, используя хештег #рекомендую_...",
+            call.message.chat.id,
+            call.message.message_id
+        )
+        bot.answer_callback_query(call.id)
+        return
+
+    text = f"👥 **Рекомендации других клиентов по услуге {service}:**\n\n"
+    for master, contact, desc, date in recs:
+        text += f"👤 **{master}**\n📞 Контакт: {contact}\n📝 {desc}\n🕒 {date}\n\n"
+
+    bot.edit_message_text(
+        text,
         call.message.chat.id,
         call.message.message_id
     )
