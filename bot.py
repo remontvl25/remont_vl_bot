@@ -38,8 +38,8 @@ if not TOKEN:
     print("❌ Токен не найден в переменных окружения!")
     sys.exit(1)
 
-CHANNEL_ID = os.environ.get('CHANNEL_ID', '-1003711282924')  # ID канала (числовой)
-CHAT_ID = os.environ.get('CHAT_ID', "@remontvl25chat")          # общий чат
+CHANNEL_ID = os.environ.get('CHANNEL_ID', '-1003711282924')
+CHAT_ID = os.environ.get('CHAT_ID', "@remontvl25chat")
 ADMIN_ID = int(os.environ.get('ADMIN_ID', '0'))
 MASTER_CHAT_ID = os.environ.get('MASTER_CHAT_ID', '@remontvl25masters')
 MASTER_CHAT_INVITE_LINK = os.environ.get('MASTER_CHAT_INVITE_LINK', '')
@@ -50,8 +50,9 @@ FORM_ENTRY_TG_USERNAME = os.environ.get('FORM_ENTRY_TG_USERNAME', '')
 
 bot = telebot.TeleBot(TOKEN)
 
-# ================ БАЗА ДАННЫХ ================
-conn = sqlite3.connect('remont.db', check_same_thread=False)
+# ================ БАЗА ДАННЫХ (с поддержкой Volume) ================
+DB_PATH = os.environ.get('DB_PATH', 'remont.db')
+conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 cursor = conn.cursor()
 
 # ----- Таблица пользователей (роли) -----
@@ -187,10 +188,10 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS rec_comments
 cursor.execute('''CREATE TABLE IF NOT EXISTS responses
                 (id INTEGER PRIMARY KEY,
                  request_id INTEGER,
-                 master_id INTEGER,          -- id из таблицы masters
+                 master_id INTEGER,
                  price TEXT,
                  comment TEXT,
-                 status TEXT DEFAULT 'pending',  -- pending, accepted, rejected
+                 status TEXT DEFAULT 'pending',
                  created_at TEXT)''')
 
 # ----- Таблица запросов на подробности об отзыве -----
@@ -1612,7 +1613,6 @@ def request_type_callback(call):
     data = bot.request_temp[user_id]
     data['is_public'] = is_public
 
-    # Сохраняем заявку в БД
     cursor.execute('''INSERT INTO requests 
                     (user_id, username, service, description, district, date, budget, status, is_public, created_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
@@ -1624,7 +1624,6 @@ def request_type_callback(call):
     conn.commit()
     request_id = cursor.lastrowid
 
-    # Анонимный псевдоним для клиента
     client_alias = f"Клиент #{request_id % 10000}"
     request_text = f"""
 🆕 **НОВАЯ ЗАЯВКА!**
@@ -1654,7 +1653,6 @@ def request_type_callback(call):
 
     try:
         bot.send_message(target_chat, request_text, reply_markup=markup)
-        # Если заявка публичная, дублируем в мастер-чат
         if is_public:
             bot.send_message(MASTER_CHAT_ID, request_text, reply_markup=markup)
     except Exception as e:
@@ -1670,7 +1668,6 @@ def request_type_callback(call):
         )
     )
 
-    # Рассылаем уведомления мастерам (без контактов, с кнопкой отклика)
     notify_masters_about_new_request(request_id, data)
 
     show_role_menu(call.message, 'client')
@@ -1973,7 +1970,6 @@ def my_requests(message):
         else:
             text += "😴 Пока нет откликов.\n"
 
-        # Если заявка публичная – добавляем кнопку рекомендаций
         if is_public:
             markup.add(types.InlineKeyboardButton(
                 "👥 Рекомендации других клиентов",
@@ -1999,7 +1995,6 @@ def choose_master_callback(call):
     cursor.execute('UPDATE responses SET status = "accepted" WHERE id = ?', (resp_id,))
     conn.commit()
 
-    # Получаем данные мастера
     cursor.execute('SELECT user_id, name, phone FROM masters WHERE id = ?', (master_db_id,))
     master = cursor.fetchone()
     if master:
@@ -2009,14 +2004,12 @@ def choose_master_callback(call):
         master_username = user_row[0] if user_row else None
         master_contact = f"@{master_username}" if master_username else master_phone
 
-        # Данные клиента
         cursor.execute('SELECT user_id, username FROM requests WHERE id = ?', (req_id,))
         client = cursor.fetchone()
         if client:
             client_user_id, client_username = client
             client_contact = f"@{client_username}" if client_username else f"ID {client_user_id}"
 
-            # Отправляем мастеру контакт клиента
             try:
                 bot.send_message(
                     master_user_id,
@@ -2027,7 +2020,6 @@ def choose_master_callback(call):
             except:
                 pass
 
-            # Отправляем клиенту контакт мастера
             try:
                 bot.send_message(
                     client_user_id,
@@ -2037,7 +2029,6 @@ def choose_master_callback(call):
             except:
                 pass
 
-    # Уведомляем других мастеров о закрытии заявки
     cursor.execute('SELECT master_id FROM responses WHERE request_id = ? AND id != ? AND status = "pending"', (req_id, resp_id))
     other_responses = cursor.fetchall()
     for (other_master_db_id,) in other_responses:
@@ -2060,7 +2051,6 @@ def choose_master_callback(call):
 @bot.callback_query_handler(func=lambda call: call.data.startswith('recs_for_request_'))
 def show_recs_for_request(call):
     req_id = int(call.data.split('_')[3])
-    # Получаем специализацию заявки
     cursor.execute('SELECT service, is_public FROM requests WHERE id = ?', (req_id,))
     row = cursor.fetchone()
     if not row:
