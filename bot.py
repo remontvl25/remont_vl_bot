@@ -1438,20 +1438,16 @@ def save_master_application(message, user_id, user_data):
     if 'verification_type' not in user_data:
         user_data['verification_type'] = 'simple'
         print(f"⚠️ verification_type отсутствовал, установлен 'simple' для user {user_id}")
-    
+
     # Проверяем наличие обязательных ключей
-    required_keys = ['verification_type', 'name', 'service', 'phone', 'districts', 
+    required_keys = ['verification_type', 'name', 'service', 'phone', 'districts',
                      'price_min', 'price_max', 'experience', 'entity_type']
     missing = [key for key in required_keys if key not in user_data]
     if missing:
         bot.send_message(message.chat.id, f"❌ Отсутствуют данные: {', '.join(missing)}. Пожалуйста, начните анкету заново.")
         print(f"DEBUG: missing keys for user {user_id}: {missing}")
         return
-    
-    # Если verification_type нет, устанавливаем значение по умолчанию (на всякий случай)
-    if 'verification_type' not in user_data:
-        user_data['verification_type'] = 'simple'
-        print(f"DEBUG: verification_type not found, set to 'simple' for user {user_id}")
+
     name = user_data['name']
     services_str = user_data['services']
     service = user_data.get('service', services_str.split(',')[0])
@@ -1486,6 +1482,23 @@ def save_master_application(message, user_id, user_data):
     conn.commit()
     application_id = cursor.lastrowid
 
+    # ... здесь может быть ваш код отправки уведомления админу и мастеру ...
+
+    # ===== БЛОК ДЛЯ ОТПРАВКИ ДОКУМЕНТОВ =====
+    if user_data.get('documents_verified') == 'pending':
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("📎 Отправить документы", callback_data=f"send_docs_{application_id}"))
+        bot.send_message(
+            message.chat.id,
+            "Вы выбрали вариант с проверкой документов. Вы можете отправить фото/скан документов администратору прямо сейчас.",
+            reply_markup=markup
+        )
+    # =========================================
+
+    # Очистка временных данных
+    if user_id in bot.master_data:
+        del bot.master_data[user_id]
+        
     entity_display = "👤 Частное лицо" if entity_type == 'individual' else "🏢 Компания/ИП"
     admin_msg = f"""
 🆕 **НОВАЯ АНКЕТА МАСТЕРА!** (ID: {application_id})
@@ -1538,14 +1551,6 @@ def save_master_application(message, user_id, user_data):
     bot.send_message(
         message.chat.id,
         "Хотите добавить ещё одну специализацию? Нажмите кнопку ниже.",
-        reply_markup=markup
-    )
-if user_data.get('documents_verified') == 'pending':
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("📎 Отправить документы", callback_data=f"send_docs_{application_id}"))
-    bot.send_message(
-        message.chat.id,
-        "Вы выбрали вариант с проверкой документов. Вы можете отправить фото/скан документов администратору прямо сейчас.",
         reply_markup=markup
     )
     
