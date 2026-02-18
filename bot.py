@@ -39,6 +39,12 @@ MASTER_CHAT_INVITE_LINK = os.environ.get('MASTER_CHAT_INVITE_LINK', '')
 
 DB_PATH = os.environ.get('DB_PATH', 'remont.db')
 
+# Создаём директорию для базы данных, если указан путь с папками
+db_dir = os.path.dirname(DB_PATH)
+if db_dir and not os.path.exists(db_dir):
+    os.makedirs(db_dir, exist_ok=True)
+    print(f"✅ Создана директория для БД: {db_dir}")
+
 # Создаём директорию для базы данных, если её нет
 db_dir = os.path.dirname(DB_PATH)
 if db_dir and not os.path.exists(db_dir):
