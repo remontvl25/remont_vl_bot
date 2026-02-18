@@ -2203,16 +2203,16 @@ def approve_master(message):
          documents_list, payment_methods, preferred_contact, age_group, source) = app
 
         now = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
-        cursor.execute('''INSERT INTO masters
-                        (user_id, name, service, phone, districts, price_min, price_max,
-                         experience, bio, portfolio, documents, entity_type, verification_type,
-                         documents_list, payment_methods, preferred_contact, age_group,
-                         source, status, created_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                        (user_id, name, service, phone, districts, price_min, price_max,
-                         experience, bio, portfolio, documents, entity_type, verification_type,
-                         documents_list, payment_methods, preferred_contact, age_group,
-                         source, 'активен', now))
+cursor.execute('''INSERT INTO masters
+                (user_id, name, service, phone, districts, price_min, price_max,
+                 experience, bio, portfolio, documents, entity_type, verification_type,
+                 documents_list, payment_methods, preferred_contact, age_group,
+                 source, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                (user_id, name, service, phone, districts, price_min, price_max,
+                 experience, bio, portfolio, documents, entity_type, verification_type,
+                 documents_list, payment_methods, preferred_contact, age_group,
+                 source, 'активен', now))
         conn.commit()
         master_id = cursor.lastrowid
 
