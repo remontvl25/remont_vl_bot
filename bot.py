@@ -243,6 +243,52 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS review_complaints
                  status TEXT DEFAULT 'new',
                  created_at TEXT)''')
 
+# Проверка и добавление недостающих колонок в таблицу master_applications
+try:
+    cursor.execute("ALTER TABLE master_applications ADD COLUMN verification_type TEXT DEFAULT 'simple'")
+    print("✅ Колонка verification_type добавлена")
+except sqlite3.OperationalError as e:
+    if "duplicate column name" in str(e):
+        print("ℹ️ Колонка verification_type уже существует")
+    else:
+        print(f"⚠️ Ошибка при добавлении verification_type: {e}")
+
+try:
+    cursor.execute("ALTER TABLE master_applications ADD COLUMN documents_list TEXT DEFAULT ''")
+    print("✅ Колонка documents_list добавлена")
+except sqlite3.OperationalError as e:
+    if "duplicate column name" in str(e):
+        print("ℹ️ Колонка documents_list уже существует")
+    else:
+        print(f"⚠️ Ошибка: {e}")
+
+try:
+    cursor.execute("ALTER TABLE master_applications ADD COLUMN payment_methods TEXT DEFAULT ''")
+    print("✅ Колонка payment_methods добавлена")
+except sqlite3.OperationalError as e:
+    if "duplicate column name" in str(e):
+        print("ℹ️ Колонка payment_methods уже существует")
+    else:
+        print(f"⚠️ Ошибка: {e}")
+
+try:
+    cursor.execute("ALTER TABLE master_applications ADD COLUMN preferred_contact TEXT DEFAULT 'telegram'")
+    print("✅ Колонка preferred_contact добавлена")
+except sqlite3.OperationalError as e:
+    if "duplicate column name" in str(e):
+        print("ℹ️ Колонка preferred_contact уже существует")
+    else:
+        print(f"⚠️ Ошибка: {e}")
+
+try:
+    cursor.execute("ALTER TABLE master_applications ADD COLUMN age_group TEXT DEFAULT ''")
+    print("✅ Колонка age_group добавлена")
+except sqlite3.OperationalError as e:
+    if "duplicate column name" in str(e):
+        print("ℹ️ Колонка age_group уже существует")
+    else:
+        print(f"⚠️ Ошибка: {e}")
+
 conn.commit()
 
 # Проверка и добавление недостающих колонок в таблицу master_applications
