@@ -11,6 +11,42 @@ from datetime import datetime, timedelta, timezone
 import telebot
 from telebot import types
 
+# Специализации
+SERVICES = [
+    ("plumber", "Сантехник"),
+    ("electrician", "Электрик"),
+    ("finisher", "Отделочник"),
+    ("builder", "Строитель"),
+    ("welder", "Сварщик"),
+    ("handyman", "Разнорабочий"),
+    ("other", "Другое"),
+    ("designer", "Дизайнер интерьера"),
+    ("full", "Полный комплекс")
+]
+SERVICES_DICT = {code: name for code, name in SERVICES}
+
+# Типы документов
+DOC_TYPES = [
+    ("contract", "Договор"),
+    ("act", "Акт выполненных работ"),
+    ("check", "Чек"),
+    ("invoice", "Счёт"),
+    ("ip", "Свидетельство ИП"),
+    ("selfemployed", "Самозанятость"),
+    ("passport", "Паспорт (для проверки)")
+]
+DOC_TYPES_DICT = {code: name for code, name in DOC_TYPES}
+
+# Способы оплаты
+PAYMENT_METHODS = [
+    ("cash", "Наличные"),
+    ("card", "Карта"),
+    ("transfer", "Перевод на карту"),
+    ("account", "Расчётный счёт"),
+    ("crypto", "Криптовалюта")
+]
+PAYMENT_DICT = {code: name for code, name in PAYMENT_METHODS}
+
 DISTRICTS = [
     ("center", "Центр"),
     ("sneg", "Снеговая Падь"),
