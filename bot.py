@@ -1405,15 +1405,6 @@ def save_app_callback(call):
         bot.answer_callback_query(call.id, "❌ Ошибка сохранения")
         bot.send_message(call.message.chat.id, f"❌ Ошибка: {e}")
 
-if user_data.get('documents_verified') == 'pending':
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("📎 Отправить документы", callback_data=f"send_docs_{application_id}"))
-    bot.send_message(
-        message.chat.id,
-        "Вы выбрали вариант с проверкой документов. Вы можете отправить фото/скан документов администратору прямо сейчас.",
-        reply_markup=markup
-    )
-
 @bot.callback_query_handler(func=lambda call: call.data.startswith('send_docs_'))
 def send_docs_callback(call):
     app_id = int(call.data.split('_')[2])
@@ -1549,7 +1540,15 @@ def save_master_application(message, user_id, user_data):
         "Хотите добавить ещё одну специализацию? Нажмите кнопку ниже.",
         reply_markup=markup
     )
-
+if user_data.get('documents_verified') == 'pending':
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("📎 Отправить документы", callback_data=f"send_docs_{application_id}"))
+    bot.send_message(
+        message.chat.id,
+        "Вы выбрали вариант с проверкой документов. Вы можете отправить фото/скан документов администратору прямо сейчас.",
+        reply_markup=markup
+    )
+    
     if user_id in bot.master_data:
         del bot.master_data[user_id]
 
