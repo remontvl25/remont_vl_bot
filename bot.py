@@ -279,8 +279,6 @@ def stop_other_instances():
     except:
         pass
 
-   from datetime import datetime, timedelta, timezone
-
 def is_night_time():
     now_utc = datetime.now(timezone.utc).replace(tzinfo=None)  # убираем timezone для совместимости
     local_time = now_utc + timedelta(hours=TIMEZONE_OFFSET)
