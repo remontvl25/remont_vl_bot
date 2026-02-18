@@ -659,12 +659,9 @@ CONTACT_METHODS = ["Telegram", "WhatsApp", "Телефонный звонок"]
 
 @bot.message_handler(commands=['become_master'])
 def become_master(message, verif_type='simple'):
-    if not only_private(message):
-        return
     user_id = message.from_user.id
-    # Очищаем старые данные, если были
     if user_id in bot.master_data:
-        del bot.master_data[user_id]
+        del bot.master_data[user_id]  # начинаем с чистого листа
     bot.master_data[user_id] = {'verification_type': verif_type}
     
     markup = types.InlineKeyboardMarkup(row_width=2)
