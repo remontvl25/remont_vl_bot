@@ -731,11 +731,11 @@ def ask_districts_multiple(chat_id, user_id):
         bot.master_data[user_id]['selected_districts'] = []
     selected = bot.master_data[user_id]['selected_districts']
     
-    for d in DISTRICTS_LIST:
-        prefix = "✅ " if d in selected else ""
+    for code, name in DISTRICTS:
+        prefix = "✅ " if name in selected else ""
         markup.add(types.InlineKeyboardButton(
-            f"{prefix}{d}",
-            callback_data=f"dist_{d}"
+            f"{prefix}{name}",
+            callback_data=f"dist_{code}"  # передаём код
         ))
     markup.add(types.InlineKeyboardButton("✅ Готово", callback_data="dist_done"))
     bot.send_message(
