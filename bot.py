@@ -1200,6 +1200,19 @@ def save_app_callback(call):
         bot.send_message(call.message.chat.id, f"❌ Ошибка: {e}")
 
 def save_master_application(message, user_id, user_data):
+    # Проверяем наличие обязательных ключей
+    required_keys = ['verification_type', 'name', 'service', 'phone', 'districts', 
+                     'price_min', 'price_max', 'experience', 'entity_type']
+    missing = [key for key in required_keys if key not in user_data]
+    if missing:
+        bot.send_message(message.chat.id, f"❌ Отсутствуют данные: {', '.join(missing)}. Пожалуйста, начните анкету заново.")
+        print(f"DEBUG: missing keys for user {user_id}: {missing}")
+        return
+    
+    # Если verification_type нет, устанавливаем значение по умолчанию (на всякий случай)
+    if 'verification_type' not in user_data:
+        user_data['verification_type'] = 'simple'
+        print(f"DEBUG: verification_type not found, set to 'simple' for user {user_id}")
     name = user_data['name']
     services_str = user_data['services']
     service = user_data.get('service', services_str.split(',')[0])
