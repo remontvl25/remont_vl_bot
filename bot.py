@@ -245,6 +245,30 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS review_complaints
 
 conn.commit()
 
+# Проверка и добавление недостающих колонок в таблицу master_applications
+try:
+    cursor.execute("ALTER TABLE master_applications ADD COLUMN verification_type TEXT DEFAULT 'simple'")
+except sqlite3.OperationalError:
+    pass  # колонка уже есть
+try:
+    cursor.execute("ALTER TABLE master_applications ADD COLUMN documents_list TEXT DEFAULT ''")
+except sqlite3.OperationalError:
+    pass
+try:
+    cursor.execute("ALTER TABLE master_applications ADD COLUMN payment_methods TEXT DEFAULT ''")
+except sqlite3.OperationalError:
+    pass
+try:
+    cursor.execute("ALTER TABLE master_applications ADD COLUMN preferred_contact TEXT DEFAULT 'telegram'")
+except sqlite3.OperationalError:
+    pass
+try:
+    cursor.execute("ALTER TABLE master_applications ADD COLUMN age_group TEXT DEFAULT ''")
+except sqlite3.OperationalError:
+    pass
+conn.commit()
+
+
 # ================ ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ================
 def safe_text(message):
     return message.text.strip() if message and message.text else ""
