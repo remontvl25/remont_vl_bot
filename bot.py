@@ -11,6 +11,18 @@ from datetime import datetime, timedelta, timezone
 import telebot
 from telebot import types
 
+DISTRICTS = [
+    ("center", "Центр"),
+    ("sneg", "Снеговая Падь"),
+    ("pervorech", "Первореченский (Гоголя, Толстого, ДальПресс)"),
+    ("sovetsky", "Советский район (100-летие, Вторая речка, Заря, Варяг)"),
+    ("pervomay", "Первомайский район (Луговая, Окатовая, Тихая, Патрокл)"),
+    ("frunze", "Фрунзенский район (Эгершельд, Маяк)")
+]
+DISTRICTS_DICT = {code: name for code, name in DISTRICTS}
+DISTRICTS_LIST = [name for code, name in DISTRICTS]
+
+
 # ================ БЛОКИРОВКА ЗАПУСКА ВТОРОГО ЭКЗЕМПЛЯРА ================
 def single_instance():
     lock_file = '/tmp/bot.lock'
