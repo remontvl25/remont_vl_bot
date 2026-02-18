@@ -1197,10 +1197,10 @@ def save_app_callback(call):
         bot.send_message(call.message.chat.id, f"❌ Ошибка: {e}")
 
 def save_master_application(message, user_id, user_data):
-
-if 'verification_type' not in user_data:
-    user_data['verification_type'] = 'simple'
-    print(f"⚠️ verification_type отсутствовал, установлен 'simple' для user {user_id}")
+    # проверка наличия verification_type
+    if 'verification_type' not in user_data:
+        user_data['verification_type'] = 'simple'
+        print(f"⚠️ verification_type отсутствовал, установлен 'simple' для user {user_id}")
     
     # Проверяем наличие обязательных ключей
     required_keys = ['verification_type', 'name', 'service', 'phone', 'districts', 
