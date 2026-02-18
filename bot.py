@@ -299,10 +299,6 @@ except sqlite3.OperationalError as e:
     else:
         print(f"⚠️ Ошибка при добавлении documents в masters: {e}")
 
-# При необходимости можно добавить и другие колонки, если они отсутствуют
-# (но documents_list, payment_methods и др. уже есть в CREATE TABLE)
-
-conn.commit()
 
 # Проверка и добавление недостающих колонок в таблицу master_applications
 try:
