@@ -6,7 +6,7 @@ import sqlite3
 import requests
 import fcntl
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import telebot
 from telebot import types
@@ -267,10 +267,13 @@ def stop_other_instances():
     except:
         pass
 
+   from datetime import datetime, timedelta, timezone
+
 def is_night_time():
-    now_utc = datetime.utcnow()
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)  # убираем timezone для совместимости
     local_time = now_utc + timedelta(hours=TIMEZONE_OFFSET)
     hour = local_time.hour
+    ...
     if NIGHT_START_HOUR > NIGHT_END_HOUR:
         return hour >= NIGHT_START_HOUR or hour < NIGHT_END_HOUR
     else:
