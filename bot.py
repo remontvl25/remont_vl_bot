@@ -774,54 +774,54 @@ def process_master_name(message):
     )
     bot.register_next_step_handler(msg, process_master_services)
 
-def process_master_services(message):
-    if message.chat.type != 'private':
-        return
-    text = safe_text(message)
-    if not text:
-        bot.send_message(message.chat.id, "❌ Пожалуйста, выберите специализацию(и).")
-        return
-    parts = [p.strip() for p in text.split(',')]
-    services = []
-    for p in parts:
-        p_lower = p.lower()
-        if p == '1' or 'сантехник' in p_lower:
-            services.append('Сантехник')
-        elif p == '2' or 'электрик' in p_lower:
-            services.append('Электрик')
-        elif p == '3' or 'отделочник' in p_lower:
-            services.append('Отделочник')
-        elif p == '4' or 'строитель' in p_lower:
-            services.append('Строитель')
-        elif p == '5' or 'сварщик' in p_lower:
-            services.append('Сварщик')
-        elif p == '6' or 'разнорабочий' in p_lower:
-            services.append('Разнорабочий')
-        elif p == '7' or 'другое' in p_lower:
-            services.append('Другое')
-        elif p == '8' or 'дизайнер' in p_lower:
-            services.append('Дизайнер интерьера')
-        elif p == '9' or 'полный комплекс' in p_lower:
-            services.append('Полный комплекс')
-        else:
-            services.append(p.capitalize())
-    services = list(set(filter(None, services)))
-    if not services:
-        bot.send_message(message.chat.id, "❌ Не выбрано ни одной специализации.")
-        return
-    services_str = ', '.join(services)
-    user_id = message.from_user.id
-    bot.master_data[user_id]['services'] = services_str
-    bot.master_data[user_id]['service'] = services[0]
-
-    msg = bot.send_message(
-        message.chat.id,
-        "📞 **Шаг 4 из 16**\n\n"
-        "👇 **ВВЕДИТЕ ВАШ ТЕЛЕФОН:**\n\n"
-        "Пример: +7 924 123-45-67\n\n"
-        "⚠️ Номер будет виден ТОЛЬКО администратору"
+def ask_services_multiple(chat_id, user_id):
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    if 'selected_services' not in bot.master_data[user_id]:
+        bot.master_data[user_id]['selected_services'] = []
+    selected = bot.master_data[user_id]['selected_services']
+    for code, name in SERVICES:
+        prefix = "✅ " if name in selected else ""
+        markup.add(types.InlineKeyboardButton(
+            f"{prefix}{name}",
+            callback_data=f"serv_{code}"
+        ))
+    markup.add(types.InlineKeyboardButton("✅ Готово", callback_data="serv_done"))
+    bot.send_message(
+        chat_id,
+        "👷 **Шаг 3 из 16**\n\nВыберите специализацию(и) (можно несколько):",
+        reply_markup=markup
     )
-    bot.register_next_step_handler(msg, process_master_phone)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('serv_'))
+def service_callback(call):
+    user_id = call.from_user.id
+    if user_id not in bot.master_data:
+        bot.answer_callback_query(call.id, "❌ Начните анкету заново")
+        return
+    data = call.data[5:]
+    if data == "done":
+        selected = bot.master_data[user_id].get('selected_services', [])
+        if not selected:
+            bot.answer_callback_query(call.id, "❌ Выберите хотя бы одну специализацию")
+            return
+        bot.master_data[user_id]['services'] = ", ".join(selected)
+        bot.master_data[user_id]['service'] = selected[0]  # первая как основная
+        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+        ask_master_phone(call.message.chat.id, user_id)
+        bot.answer_callback_query(call.id, "✅ Специализации сохранены")
+    else:
+        service_name = SERVICES_DICT.get(data)
+        if not service_name:
+            bot.answer_callback_query(call.id, "❌ Ошибка")
+            return
+        selected = bot.master_data[user_id].get('selected_services', [])
+        if service_name in selected:
+            selected.remove(service_name)
+        else:
+            selected.append(service_name)
+        bot.master_data[user_id]['selected_services'] = selected
+        ask_services_multiple(call.message.chat.id, user_id)
+        bot.answer_callback_query(call.id)
 
 def process_master_phone(message):
     if message.chat.type != 'private':
