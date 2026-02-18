@@ -289,6 +289,19 @@ except sqlite3.OperationalError as e:
     else:
         print(f"⚠️ Ошибка: {e}")
 
+# ===== Добавление недостающих колонок в таблицу masters =====
+try:
+    cursor.execute("ALTER TABLE masters ADD COLUMN documents TEXT DEFAULT ''")
+    print("✅ Колонка documents добавлена в таблицу masters")
+except sqlite3.OperationalError as e:
+    if "duplicate column name" in str(e):
+        print("ℹ️ Колонка documents уже существует в masters")
+    else:
+        print(f"⚠️ Ошибка при добавлении documents в masters: {e}")
+
+# При необходимости можно добавить и другие колонки, если они отсутствуют
+# (но documents_list, payment_methods и др. уже есть в CREATE TABLE)
+
 conn.commit()
 
 # Проверка и добавление недостающих колонок в таблицу master_applications
