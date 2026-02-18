@@ -39,6 +39,12 @@ MASTER_CHAT_INVITE_LINK = os.environ.get('MASTER_CHAT_INVITE_LINK', '')
 
 DB_PATH = os.environ.get('DB_PATH', 'remont.db')
 
+# Создаём директорию для базы данных, если её нет
+db_dir = os.path.dirname(DB_PATH)
+if db_dir and not os.path.exists(db_dir):
+    os.makedirs(db_dir, exist_ok=True)
+
+
 NIGHT_START_HOUR = int(os.environ.get('NIGHT_START_HOUR', 23))
 NIGHT_END_HOUR = int(os.environ.get('NIGHT_END_HOUR', 7))
 TIMEZONE_OFFSET = int(os.environ.get('TIMEZONE_OFFSET', 10))
