@@ -1006,6 +1006,20 @@ def help_portfolio_callback(call):
         "Или вы можете самостоятельно загрузить фото на Яндекс.Диск или Google Фото и поделиться ссылкой."
     )
 
+@bot.callback_query_handler(func=lambda call: call.data == 'portfolio_send_to_admin')
+def portfolio_send_to_admin_callback(call):
+    user_id = call.from_user.id
+    bot.send_message(
+        call.message.chat.id,
+        "📤 Вы можете отправить фото/видео своих работ администратору в личные сообщения (@remont_vl25).\n"
+        "После получения администратор создаст ссылку и добавит её в вашу анкету, либо вы сможете добавить её позже через редактирование."
+    )
+    bot.send_message(
+        ADMIN_ID,
+        f"🔔 Мастер @{call.from_user.username or 'нет'} (ID {user_id}) хочет отправить фото для портфолио. Свяжитесь с ним."
+    )
+    bot.answer_callback_query(call.id)
+    
 @bot.callback_query_handler(func=lambda call: call.data == 'skip_portfolio')
 def skip_portfolio_callback(call):
     user_id = call.from_user.id
