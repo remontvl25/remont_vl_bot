@@ -986,6 +986,14 @@ def ask_portfolio(chat_id, user_id):
     )
     bot.register_next_step_handler_by_chat_id(chat_id, process_master_portfolio_text, user_id)
 
+def ask_portfolio(chat_id, user_id):
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("⏩ Пропустить", callback_data="skip_portfolio"))
+    markup.add(types.InlineKeyboardButton("❓ Как загрузить фото?", callback_data="help_portfolio"))
+    markup.add(types.InlineKeyboardButton("📤 Отправить фото админу", callback_data="portfolio_send_to_admin"))
+    bot.send_message(chat_id, "...", reply_markup=markup)
+    bot.register_next_step_handler_by_chat_id(chat_id, process_master_portfolio_text, user_id)
+
 @bot.callback_query_handler(func=lambda call: call.data == 'help_portfolio')
 def help_portfolio_callback(call):
     bot.answer_callback_query(call.id)
