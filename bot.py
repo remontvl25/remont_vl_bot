@@ -1194,34 +1194,18 @@ def payment_callback(call):
         ask_payment_multiple(call.message.chat.id, user_id)
         bot.answer_callback_query(call.id)
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith('doc_type_'))
-def doc_type_callback(call):
+@bot.callback_query_handler(func=lambda call: call.data.startswith('doc_'))
+def documents_callback(call):
     user_id = call.from_user.id
     if user_id not in bot.master_data:
         bot.answer_callback_query(call.id, "❌ Начните анкету заново")
         return
-    data = call.data[9:]  # убираем 'doc_type_'
-    if data == "done":
-        selected = bot.master_data[user_id].get('selected_docs', [])
-        bot.master_data[user_id]['documents_list'] = ", ".join(selected)
+    choice = call.data.split('_')[1]
+    if choice == 'yes':
+        bot.master_data[user_id]['documents'] = "Есть"
         bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
-        ask_documents_verification(call.message, user_id)
-        bot.answer_callback_query(call.id, "✅ Список документов сохранён")
-    else:
-        doc_name = DOC_TYPES_DICT.get(data)
-        if not doc_name:
-            bot.answer_callback_query(call.id, "❌ Ошибка")
-            return
-        selected = bot.master_data[user_id].get('selected_docs', [])
-        if doc_name in selected:
-            selected.remove(doc_name)
-        else:
-            selected.append(doc_name)
-        bot.master_data[user_id]['selected_docs'] = selected
-        ask_doc_types_multiple(call.message.chat.id, user_id)
-        bot.answer_callback_query(call.id)
-       
-        bot.register_next_step_handler(call.message, process_documents_list, user_id)
+        ask_doc_types_multiple(call.message.chat.id, user_id)   # <- нет лишних строк
+        bot.answer_callback_query(call.id)                      # <- эта строка может быть лишней, если ask_doc_types_multiple уже отправляет ответ
     elif choice == 'no':
         bot.master_data[user_id]['documents'] = "Нет"
         bot.master_data[user_id]['documents_list'] = ""
@@ -1232,7 +1216,6 @@ def doc_type_callback(call):
         bot.master_data[user_id]['documents_list'] = ""
         bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
         ask_preferred_contact(call.message, user_id)
-    bot.answer_callback_query(call.id)
 
 def process_documents_list(message, user_id):
     if message.chat.type != 'private':
