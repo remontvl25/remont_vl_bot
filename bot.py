@@ -1133,10 +1133,20 @@ def documents_callback(call):
         bot.answer_callback_query(call.id, "❌ Начните анкету заново")
         return
     choice = call.data.split('_')[1]
-   if choice == 'yes':
-    bot.master_data[user_id]['documents'] = "Есть"
-    bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
-    ask_doc_types_multiple(call.message.chat.id, user_id)
+    if choice == 'yes':
+        bot.master_data[user_id]['documents'] = "Есть"
+        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+        ask_doc_types_multiple(call.message.chat.id, user_id)
+    elif choice == 'no':
+        bot.master_data[user_id]['documents'] = "Нет"
+        bot.master_data[user_id]['documents_list'] = ""
+        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+        ask_documents_verification(call.message, user_id)
+    else:  # пропустить
+        bot.master_data[user_id]['documents'] = "Пропустить"
+        bot.master_data[user_id]['documents_list'] = ""
+        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+        ask_documents_verification(call.message, user_id)
 
 def ask_payment_multiple(chat_id, user_id):
     markup = types.InlineKeyboardMarkup(row_width=1)
