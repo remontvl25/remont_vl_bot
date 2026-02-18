@@ -758,15 +758,19 @@ def district_callback(call):
             return
         bot.master_data[user_id]['districts'] = ", ".join(selected)
         bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
-        # Переходим к следующему шагу (цена)
         ask_price_min(call.message.chat.id, user_id)
         bot.answer_callback_query(call.id, "✅ Районы сохранены")
     else:
+        # data - это код района
+        district_name = DISTRICTS_DICT.get(data)
+        if not district_name:
+            bot.answer_callback_query(call.id, "❌ Ошибка: район не найден")
+            return
         selected = bot.master_data[user_id].get('selected_districts', [])
-        if data in selected:
-            selected.remove(data)
+        if district_name in selected:
+            selected.remove(district_name)
         else:
-            selected.append(data)
+            selected.append(district_name)
         bot.master_data[user_id]['selected_districts'] = selected
         # Обновляем клавиатуру
         ask_districts_multiple(call.message.chat.id, user_id)
