@@ -2494,19 +2494,21 @@ if __name__ == '__main__':
     print(f"   Админ ID: {ADMIN_ID}")
     print(f"   База данных: {DB_PATH}")
 
-    # Проверка прав в канале (опционально)
+    # Проверка прав в канале
     try:
         if not check_bot_admin_in_chat(CHANNEL_ID):
             print(f"⚠️ Бот не является администратором канала {CHANNEL_ID}. Публикация заявок может не работать.")
     except:
         print("⚠️ Не удалось проверить права в канале.")
 
-    # Публикуем отложенные заявки при старте (если не ночь)
+    # Публикация отложенных заявок
     if not is_night_time():
         publish_delayed_requests()
 
-    # Убираем вебхук на всякий случай
+    # Сбрасываем вебхук и останавливаем другие экземпляры
     reset_webhook()
+    stop_other_instances()
+    time.sleep(2)  # небольшая пауза, чтобы старые соединения закрылись
 
     # Запуск поллинга
     bot.infinity_polling(skip_pending=True)
