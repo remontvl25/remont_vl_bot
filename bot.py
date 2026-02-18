@@ -33,7 +33,7 @@ def single_instance():
         print("❌ Бот уже запущен! Завершаем работу.")
         sys.exit(1)
 
-single_instance()
+# single_instance()
 
 # ================ НАСТРОЙКИ ================
 TOKEN = os.environ.get('TOKEN')
@@ -2532,7 +2532,7 @@ if __name__ == '__main__':
     # Сбрасываем вебхук и останавливаем другие экземпляры
     reset_webhook()
     stop_other_instances()
-    time.sleep(2)  # небольшая пауза, чтобы старые соединения закрылись
+    time.sleep(3)  # небольшая пауза, чтобы старые соединения закрылись
 
     # Запуск поллинга
     bot.infinity_polling(skip_pending=True)
