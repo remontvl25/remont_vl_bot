@@ -1372,7 +1372,8 @@ def process_edit_field_value(message, field, user_id):
                      datetime.now().strftime("%d.%m.%Y %H:%M")))
     conn.commit()
     application_id = cursor.lastrowid
-
+    if user_id in bot.master_data:
+        del bot.master_data[user_id]
     # Уведомление админу
     admin_msg = f"""
 🆕 **НОВАЯ АНКЕТА МАСТЕРА!** (ID: {application_id})
