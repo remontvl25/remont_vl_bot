@@ -1237,9 +1237,24 @@ def edit_summary_callback(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('edit_field_'))
 def edit_field_callback(call):
-    parts = call.data.split('_')
-    field = parts[2]
-    user_id = int(parts[3])
+    data = call.data  # например, "edit_field_documents_list_12345"
+    prefix = "edit_field_"
+    if not data.startswith(prefix):
+        bot.answer_callback_query(call.id, "❌ Ошибка")
+        return
+    rest = data[len(prefix):]  # "documents_list_12345"
+    # Ищем последнее подчёркивание
+    last_underscore = rest.rfind('_')
+    if last_underscore == -1:
+        bot.answer_callback_query(call.id, "❌ Ошибка")
+        return
+    field = rest[:last_underscore]  # "documents_list"
+    user_id_str = rest[last_underscore+1:]  # "12345"
+    try:
+        user_id = int(user_id_str)
+    except ValueError:
+        bot.answer_callback_query(call.id, "❌ Ошибка")
+        return
     if call.from_user.id != user_id:
         bot.answer_callback_query(call.id, "❌ Это не ваша анкета")
         return
