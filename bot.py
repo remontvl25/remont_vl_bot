@@ -2733,6 +2733,613 @@ def manual_publish_delayed(message):
     publish_delayed_requests()
     bot.reply_to(message, "✅ Попытка публикации отложенных заявок выполнена.")
 
+# ================ РУЧНОЕ ДОБАВЛЕНИЕ МАСТЕРА АДМИНИСТРАТОРОМ ================
+if not hasattr(bot, 'admin_add_data'):
+    bot.admin_add_data = {}
+
+def start_manual_master_add(call_or_message):
+    """Начинает процесс добавления мастера вручную."""
+    user_id = call_or_message.from_user.id
+    if user_id != ADMIN_ID:
+        bot.answer_callback_query(call_or_message.id, "❌ Нет прав") if hasattr(call_or_message, 'id') else bot.send_message(call_or_message.chat.id, "❌ Нет прав")
+        return
+    bot.admin_add_data[user_id] = {}
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("👤 Частное лицо", callback_data="admin_entity_individual"),
+        types.InlineKeyboardButton("🏢 Компания / ИП", callback_data="admin_entity_company")
+    )
+    bot.send_message(
+        call_or_message.chat.id if hasattr(call_or_message, 'chat') else call_or_message.message.chat.id,
+        "👷 **РУЧНОЕ ДОБАВЛЕНИЕ МАСТЕРА**\n\n"
+        "Шаг 1 из 16\n"
+        "👇 **ВЫБЕРИТЕ ТИП:**",
+        reply_markup=markup
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('admin_entity_'))
+def admin_entity_callback(call):
+    if call.from_user.id != ADMIN_ID:
+        bot.answer_callback_query(call.id, "❌ Нет прав")
+        return
+    entity_type = call.data.split('_')[2]  # individual или company
+    user_id = call.from_user.id
+    bot.admin_add_data[user_id]['entity_type'] = entity_type
+
+    if entity_type == 'individual':
+        question = "👤 **ВВЕДИТЕ ПОЛНОЕ ИМЯ МАСТЕРА:**"
+    else:
+        question = "🏢 **ВВЕДИТЕ НАЗВАНИЕ КОМПАНИИ ИЛИ БРИГАДЫ:**"
+
+    bot.edit_message_text(
+        f"👷 **РУЧНОЕ ДОБАВЛЕНИЕ МАСТЕРА**\n\n"
+        f"Шаг 2 из 16\n"
+        f"👇 {question}",
+        call.message.chat.id,
+        call.message.message_id
+    )
+    bot.register_next_step_handler(call.message, admin_process_name)
+    bot.answer_callback_query(call.id)
+
+def admin_process_name(message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    name = safe_text(message)
+    if not name:
+        bot.send_message(message.chat.id, "❌ Пожалуйста, введите имя/название.")
+        bot.register_next_step_handler(message, admin_process_name)
+        return
+    user_id = message.from_user.id
+    bot.admin_add_data[user_id]['name'] = name
+    admin_ask_age(message.chat.id, user_id)
+
+def admin_ask_age(chat_id, user_id):
+    markup = types.InlineKeyboardMarkup(row_width=3)
+    markup.add(
+        types.InlineKeyboardButton("до 25 лет", callback_data="admin_age_under25"),
+        types.InlineKeyboardButton("25-35 лет", callback_data="admin_age_25_35"),
+        types.InlineKeyboardButton("35-50 лет", callback_data="admin_age_35_50"),
+        types.InlineKeyboardButton("старше 50", callback_data="admin_age_over50"),
+        types.InlineKeyboardButton("⏩ Пропустить", callback_data="admin_age_skip")
+    )
+    bot.send_message(
+        chat_id,
+        "🎂 **Шаг 3 из 16**\n\n"
+        "Укажите возраст мастера (необязательно).",
+        reply_markup=markup
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('admin_age_'))
+def admin_age_callback(call):
+    if call.from_user.id != ADMIN_ID:
+        bot.answer_callback_query(call.id, "❌ Нет прав")
+        return
+    user_id = call.from_user.id
+    age_map = {
+        'under25': 'до 25',
+        '25_35': '25-35',
+        '35_50': '35-50',
+        'over50': 'старше 50',
+        'skip': ''
+    }
+    key = call.data[10:]  # убираем 'admin_age_'
+    bot.admin_add_data[user_id]['age_group'] = age_map.get(key, '')
+    bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+    admin_ask_profiles(call.message.chat.id, user_id)
+    bot.answer_callback_query(call.id)
+
+def admin_ask_profiles(chat_id, user_id):
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    if 'selected_profiles' not in bot.admin_add_data[user_id]:
+        bot.admin_add_data[user_id]['selected_profiles'] = []
+    selected = bot.admin_add_data[user_id]['selected_profiles']
+    for code, name in PROFILES:
+        prefix = "✅ " if name in selected else ""
+        markup.add(types.InlineKeyboardButton(
+            f"{prefix}{name}",
+            callback_data=f"admin_prof_{code}"
+        ))
+    markup.add(types.InlineKeyboardButton("✅ Готово", callback_data="admin_prof_done"))
+    bot.send_message(
+        chat_id,
+        "👷 **Шаг 4 из 16**\n\n"
+        "Выберите **профили**, по которым работает мастер (можно несколько):",
+        reply_markup=markup
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('admin_prof_'))
+def admin_profile_callback(call):
+    if call.from_user.id != ADMIN_ID:
+        bot.answer_callback_query(call.id, "❌ Нет прав")
+        return
+    user_id = call.from_user.id
+    data = call.data[11:]  # убираем 'admin_prof_'
+    if data == "done":
+        selected = bot.admin_add_data[user_id].get('selected_profiles', [])
+        if not selected:
+            bot.answer_callback_query(call.id, "❌ Выберите хотя бы один профиль")
+            return
+        bot.admin_add_data[user_id]['profiles'] = ", ".join(selected)
+        bot.admin_add_data[user_id]['services'] = ", ".join(selected)
+        bot.admin_add_data[user_id]['service'] = selected[0]
+        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+        admin_ask_experience(call.message.chat.id, user_id)
+        bot.answer_callback_query(call.id, "✅ Профили сохранены")
+    else:
+        profile_name = PROFILES_DICT.get(data)
+        if not profile_name:
+            bot.answer_callback_query(call.id, "❌ Ошибка")
+            return
+        selected = bot.admin_add_data[user_id].get('selected_profiles', [])
+        if profile_name in selected:
+            selected.remove(profile_name)
+        else:
+            selected.append(profile_name)
+        bot.admin_add_data[user_id]['selected_profiles'] = selected
+        admin_ask_profiles(call.message.chat.id, user_id)
+        bot.answer_callback_query(call.id)
+
+def admin_ask_experience(chat_id, user_id):
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    for code, name in EXPERIENCE_OPTIONS:
+        markup.add(types.InlineKeyboardButton(name, callback_data=f"admin_exp_{code}"))
+    bot.send_message(
+        chat_id,
+        "⏱️ **Шаг 5 из 16**\n\nВыберите опыт работы мастера:",
+        reply_markup=markup
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('admin_exp_'))
+def admin_experience_callback(call):
+    if call.from_user.id != ADMIN_ID:
+        bot.answer_callback_query(call.id, "❌ Нет прав")
+        return
+    user_id = call.from_user.id
+    code = call.data[10:]  # убираем 'admin_exp_'
+    if code == "custom":
+        bot.edit_message_text(
+            "⏱️ Введите опыт работы текстом:",
+            call.message.chat.id,
+            call.message.message_id
+        )
+        bot.register_next_step_handler(call.message, admin_process_custom_experience, user_id)
+        bot.answer_callback_query(call.id)
+    else:
+        exp_map = {k: v for k, v in EXPERIENCE_OPTIONS if k != "custom"}
+        bot.admin_add_data[user_id]['experience'] = exp_map[code]
+        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+        admin_ask_districts(call.message.chat.id, user_id)
+        bot.answer_callback_query(call.id)
+
+def admin_process_custom_experience(message, user_id):
+    if message.from_user.id != ADMIN_ID:
+        return
+    exp = safe_text(message)
+    if not exp:
+        bot.send_message(message.chat.id, "❌ Введите опыт.")
+        bot.register_next_step_handler(message, admin_process_custom_experience, user_id)
+        return
+    bot.admin_add_data[user_id]['experience'] = exp
+    admin_ask_districts(message.chat.id, user_id)
+
+def admin_ask_districts(chat_id, user_id):
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    if 'selected_districts' not in bot.admin_add_data[user_id]:
+        bot.admin_add_data[user_id]['selected_districts'] = []
+    selected = bot.admin_add_data[user_id]['selected_districts']
+    for code, name in DISTRICTS:
+        prefix = "✅ " if name in selected else ""
+        markup.add(types.InlineKeyboardButton(
+            f"{prefix}{name}",
+            callback_data=f"admin_dist_{code}"
+        ))
+    markup.add(types.InlineKeyboardButton("✅ Готово", callback_data="admin_dist_done"))
+    bot.send_message(
+        chat_id,
+        "📍 **Шаг 6 из 16**\n\nВыберите районы работы мастера (можно несколько):",
+        reply_markup=markup
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('admin_dist_'))
+def admin_district_callback(call):
+    if call.from_user.id != ADMIN_ID:
+        bot.answer_callback_query(call.id, "❌ Нет прав")
+        return
+    user_id = call.from_user.id
+    data = call.data[11:]  # убираем 'admin_dist_'
+    if data == "done":
+        selected = bot.admin_add_data[user_id].get('selected_districts', [])
+        if not selected:
+            bot.answer_callback_query(call.id, "❌ Выберите хотя бы один район")
+            return
+        bot.admin_add_data[user_id]['districts'] = ", ".join(selected)
+        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+        admin_ask_price_min(call.message.chat.id, user_id)
+        bot.answer_callback_query(call.id, "✅ Районы сохранены")
+    else:
+        district_name = DISTRICTS_DICT.get(data)
+        if not district_name:
+            bot.answer_callback_query(call.id, "❌ Ошибка")
+            return
+        selected = bot.admin_add_data[user_id].get('selected_districts', [])
+        if district_name in selected:
+            selected.remove(district_name)
+        else:
+            selected.append(district_name)
+        bot.admin_add_data[user_id]['selected_districts'] = selected
+        admin_ask_districts(call.message.chat.id, user_id)
+        bot.answer_callback_query(call.id)
+
+def admin_ask_price_min(chat_id, user_id):
+    msg = bot.send_message(
+        chat_id,
+        "💰 **Шаг 7 из 16**\n\n"
+        "Введите **минимальную цену заказа** (например: 1000₽, договорная):"
+    )
+    bot.register_next_step_handler(msg, admin_process_price_min, user_id)
+
+def admin_process_price_min(message, user_id):
+    if message.from_user.id != ADMIN_ID:
+        return
+    price_min = safe_text(message)
+    if not price_min:
+        bot.send_message(message.chat.id, "❌ Пожалуйста, укажите минимальную цену.")
+        bot.register_next_step_handler(message, admin_process_price_min, user_id)
+        return
+    bot.admin_add_data[user_id]['price_min'] = price_min
+    bot.admin_add_data[user_id]['price_max'] = ''
+    admin_ask_payment_methods(message.chat.id, user_id)
+
+def admin_ask_payment_methods(chat_id, user_id):
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    if 'selected_payments' not in bot.admin_add_data[user_id]:
+        bot.admin_add_data[user_id]['selected_payments'] = []
+    selected = bot.admin_add_data[user_id]['selected_payments']
+    for code, name in PAYMENT_METHODS:
+        prefix = "✅ " if name in selected else ""
+        markup.add(types.InlineKeyboardButton(
+            f"{prefix}{name}",
+            callback_data=f"admin_pay_{code}"
+        ))
+    markup.add(types.InlineKeyboardButton("✅ Готово", callback_data="admin_pay_done"))
+    bot.send_message(
+        chat_id,
+        "💳 **Шаг 8 из 16**\n\n"
+        "Какие способы оплаты принимает мастер? (можно несколько)",
+        reply_markup=markup
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('admin_pay_'))
+def admin_payment_callback(call):
+    if call.from_user.id != ADMIN_ID:
+        bot.answer_callback_query(call.id, "❌ Нет прав")
+        return
+    user_id = call.from_user.id
+    data = call.data[10:]  # убираем 'admin_pay_'
+    if data == "done":
+        selected = bot.admin_add_data[user_id].get('selected_payments', [])
+        bot.admin_add_data[user_id]['payment_methods'] = ", ".join(selected)
+        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+        admin_ask_bio(call.message.chat.id, user_id)
+        bot.answer_callback_query(call.id, "✅ Способы оплаты сохранены")
+    else:
+        pay_name = PAYMENT_DICT.get(data)
+        if not pay_name:
+            bot.answer_callback_query(call.id, "❌ Ошибка")
+            return
+        selected = bot.admin_add_data[user_id].get('selected_payments', [])
+        if pay_name in selected:
+            selected.remove(pay_name)
+        else:
+            selected.append(pay_name)
+        bot.admin_add_data[user_id]['selected_payments'] = selected
+        admin_ask_payment_methods(call.message.chat.id, user_id)
+        bot.answer_callback_query(call.id)
+
+def admin_ask_bio(chat_id, user_id):
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("⏩ Пропустить", callback_data="admin_skip_bio"))
+    bot.send_message(
+        chat_id,
+        "📝 **Шаг 9 из 16**\n\n"
+        "👇 **КОММЕНТАРИЙ О МАСТЕРЕ (кратко):**\n\n"
+        "Расскажите о мастере пару слов: опыт, подход к работе.\n\n"
+        "👉 **Или нажмите «Пропустить»**",
+        reply_markup=markup
+    )
+    bot.register_next_step_handler_by_chat_id(chat_id, admin_process_bio, user_id)
+
+@bot.callback_query_handler(func=lambda call: call.data == 'admin_skip_bio')
+def admin_skip_bio_callback(call):
+    if call.from_user.id != ADMIN_ID:
+        bot.answer_callback_query(call.id, "❌ Нет прав")
+        return
+    user_id = call.from_user.id
+    bot.admin_add_data[user_id]['bio'] = "Не указано"
+    admin_ask_portfolio(call.message.chat.id, user_id)
+    bot.answer_callback_query(call.id, "⏩ Пропущено")
+
+def admin_process_bio(message, user_id):
+    if message.from_user.id != ADMIN_ID:
+        return
+    bio = safe_text(message)
+    if not bio or bio.lower() == "пропустить":
+        bio = "Не указано"
+    bot.admin_add_data[user_id]['bio'] = bio
+    admin_ask_portfolio(message.chat.id, user_id)
+
+def admin_ask_portfolio(chat_id, user_id):
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("⏩ Пропустить", callback_data="admin_skip_portfolio"))
+    bot.send_message(
+        chat_id,
+        "📸 **Шаг 10 из 16**\n\n"
+        "👇 **ССЫЛКА НА ПОРТФОЛИО МАСТЕРА:**\n\n"
+        "Это может быть ссылка на Яндекс.Диск, Google Фото, Telegram-канал с работами.\n\n"
+        "👉 **Или нажмите «Пропустить»**",
+        reply_markup=markup
+    )
+    bot.register_next_step_handler_by_chat_id(chat_id, admin_process_portfolio, user_id)
+
+@bot.callback_query_handler(func=lambda call: call.data == 'admin_skip_portfolio')
+def admin_skip_portfolio_callback(call):
+    if call.from_user.id != ADMIN_ID:
+        bot.answer_callback_query(call.id, "❌ Нет прав")
+        return
+    user_id = call.from_user.id
+    bot.admin_add_data[user_id]['portfolio'] = "Не указано"
+    admin_ask_documents_question(call.message.chat.id, user_id)
+    bot.answer_callback_query(call.id, "⏩ Пропущено")
+
+def admin_process_portfolio(message, user_id):
+    if message.from_user.id != ADMIN_ID:
+        return
+    portfolio = safe_text(message)
+    if not portfolio or portfolio.lower() == "пропустить":
+        portfolio = "Не указано"
+    bot.admin_add_data[user_id]['portfolio'] = portfolio
+    admin_ask_documents_question(message.chat.id, user_id)
+
+def admin_ask_documents_question(chat_id, user_id):
+    markup = types.InlineKeyboardMarkup(row_width=3)
+    markup.add(
+        types.InlineKeyboardButton("✅ Да, использует", callback_data="admin_doc_yes"),
+        types.InlineKeyboardButton("❌ Нет", callback_data="admin_doc_no"),
+        types.InlineKeyboardButton("⏩ Пропустить", callback_data="admin_doc_skip")
+    )
+    bot.send_message(
+        chat_id,
+        "📄 **Шаг 11 из 16**\n\n"
+        "Использует ли мастер в работе какие-либо документы (договор, акт, чек, счёт и т.п.)?",
+        reply_markup=markup
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('admin_doc_'))
+def admin_documents_question_callback(call):
+    if call.from_user.id != ADMIN_ID:
+        bot.answer_callback_query(call.id, "❌ Нет прав")
+        return
+    user_id = call.from_user.id
+    choice = call.data.split('_')[2]  # yes, no, skip
+    if choice == 'yes':
+        bot.admin_add_data[user_id]['documents'] = "Есть"
+        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+        admin_ask_doc_types(call.message.chat.id, user_id)
+    elif choice == 'no':
+        bot.admin_add_data[user_id]['documents'] = "Нет"
+        bot.admin_add_data[user_id]['documents_list'] = ""
+        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+        admin_ask_contact_methods(call.message.chat.id, user_id)
+    else:
+        bot.admin_add_data[user_id]['documents'] = "Пропустить"
+        bot.admin_add_data[user_id]['documents_list'] = ""
+        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+        admin_ask_contact_methods(call.message.chat.id, user_id)
+    bot.answer_callback_query(call.id)
+
+def admin_ask_doc_types(chat_id, user_id):
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    if 'selected_docs' not in bot.admin_add_data[user_id]:
+        bot.admin_add_data[user_id]['selected_docs'] = []
+    selected = bot.admin_add_data[user_id]['selected_docs']
+    for code, name in DOC_TYPES:
+        prefix = "✅ " if name in selected else ""
+        markup.add(types.InlineKeyboardButton(
+            f"{prefix}{name}",
+            callback_data=f"admin_doc_type_{code}"
+        ))
+    markup.add(types.InlineKeyboardButton("✅ Готово", callback_data="admin_doc_type_done"))
+    bot.send_message(
+        chat_id,
+        "📄 **Шаг 12 из 16**\n\n"
+        "Какие документы может предоставить мастер? (можно несколько):",
+        reply_markup=markup
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('admin_doc_type_'))
+def admin_doc_type_callback(call):
+    if call.from_user.id != ADMIN_ID:
+        bot.answer_callback_query(call.id, "❌ Нет прав")
+        return
+    user_id = call.from_user.id
+    data = call.data[15:]  # убираем 'admin_doc_type_'
+    if data == "done":
+        selected = bot.admin_add_data[user_id].get('selected_docs', [])
+        bot.admin_add_data[user_id]['documents_list'] = ", ".join(selected)
+        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+        admin_ask_contact_methods(call.message.chat.id, user_id)
+        bot.answer_callback_query(call.id, "✅ Список документов сохранён")
+    else:
+        doc_name = DOC_TYPES_DICT.get(data)
+        if not doc_name:
+            bot.answer_callback_query(call.id, "❌ Ошибка")
+            return
+        selected = bot.admin_add_data[user_id].get('selected_docs', [])
+        if doc_name in selected:
+            selected.remove(doc_name)
+        else:
+            selected.append(doc_name)
+        bot.admin_add_data[user_id]['selected_docs'] = selected
+        admin_ask_doc_types(call.message.chat.id, user_id)
+        bot.answer_callback_query(call.id)
+
+def admin_ask_contact_methods(chat_id, user_id):
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    if 'selected_contacts' not in bot.admin_add_data[user_id]:
+        bot.admin_add_data[user_id]['selected_contacts'] = []
+    selected = bot.admin_add_data[user_id]['selected_contacts']
+    for code, name in [("telegram", "Telegram"), ("whatsapp", "WhatsApp"), ("phone", "Телефонный звонок")]:
+        prefix = "✅ " if name in selected else ""
+        markup.add(types.InlineKeyboardButton(
+            f"{prefix}{name}",
+            callback_data=f"admin_contact_{code}"
+        ))
+    markup.add(types.InlineKeyboardButton("✅ Готово", callback_data="admin_contact_done"))
+    bot.send_message(
+        chat_id,
+        "📞 **Шаг 13 из 16**\n\n"
+        "Выберите предпочтительные способы связи (можно несколько):",
+        reply_markup=markup
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('admin_contact_'))
+def admin_contact_callback(call):
+    if call.from_user.id != ADMIN_ID:
+        bot.answer_callback_query(call.id, "❌ Нет прав")
+        return
+    user_id = call.from_user.id
+    data = call.data[14:]  # убираем 'admin_contact_'
+    if data == "done":
+        selected = bot.admin_add_data[user_id].get('selected_contacts', [])
+        if not selected:
+            bot.answer_callback_query(call.id, "❌ Выберите хотя бы один способ связи")
+            return
+        bot.admin_add_data[user_id]['preferred_contact'] = ", ".join(selected)
+        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+        admin_ask_phone(call.message.chat.id, user_id)
+        bot.answer_callback_query(call.id, "✅ Способы связи сохранены")
+    else:
+        contact_names = {"telegram": "Telegram", "whatsapp": "WhatsApp", "phone": "Телефонный звонок"}
+        contact_name = contact_names.get(data)
+        if not contact_name:
+            bot.answer_callback_query(call.id, "❌ Ошибка")
+            return
+        selected = bot.admin_add_data[user_id].get('selected_contacts', [])
+        if contact_name in selected:
+            selected.remove(contact_name)
+        else:
+            selected.append(contact_name)
+        bot.admin_add_data[user_id]['selected_contacts'] = selected
+        admin_ask_contact_methods(call.message.chat.id, user_id)
+        bot.answer_callback_query(call.id)
+
+def admin_ask_phone(chat_id, user_id):
+    bot.send_message(
+        chat_id,
+        "📞 **Шаг 14 из 16**\n\n"
+        "Введите **контактный телефон мастера** (будет виден клиентам):"
+    )
+    bot.register_next_step_handler_by_chat_id(chat_id, admin_process_phone, user_id)
+
+def admin_process_phone(message, user_id):
+    if message.from_user.id != ADMIN_ID:
+        return
+    phone = safe_text(message)
+    if not phone:
+        bot.send_message(message.chat.id, "❌ Пожалуйста, введите телефон.")
+        bot.register_next_step_handler(message, admin_process_phone, user_id)
+        return
+    bot.admin_add_data[user_id]['phone'] = phone
+    admin_show_summary(message, user_id)
+
+def admin_show_summary(message, user_id):
+    data = bot.admin_add_data[user_id]
+    summary = f"""
+📋 **Сводка данных мастера:**
+
+👤 **Имя/Название:** {data['name']}
+🔧 **Профили:** {data.get('profiles', '')}
+🎂 **Возраст:** {data.get('age_group', 'Не указан')}
+⏱ **Опыт:** {data['experience']}
+📍 **Районы:** {data['districts']}
+💰 **Минимальная цена:** {data['price_min']}
+💳 **Оплата:** {data.get('payment_methods', 'Не указано')}
+💬 **О себе:** {data.get('bio', 'Не указано')}
+📸 **Портфолио:** {data.get('portfolio', 'Не указано')}
+📄 **Документы:** {data.get('documents', 'Не указано')}
+   **Список:** {data.get('documents_list', '')}
+📞 **Предпочтительный контакт:** {data.get('preferred_contact', 'telegram')}
+📞 **Телефон:** {data['phone']}
+    """
+    markup = types.InlineKeyboardMarkup()
+    markup.add(
+        types.InlineKeyboardButton("✅ Сохранить мастера", callback_data=f"admin_save_{user_id}"),
+        types.InlineKeyboardButton("❌ Отмена", callback_data="admin_cancel_add")
+    )
+    bot.send_message(message.chat.id, summary, reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('admin_save_'))
+def admin_save_callback(call):
+    if call.from_user.id != ADMIN_ID:
+        bot.answer_callback_query(call.id, "❌ Нет прав")
+        return
+    user_id = call.from_user.id
+    data = bot.admin_add_data.get(user_id)
+    if not data:
+        bot.answer_callback_query(call.id, "❌ Данные не найдены")
+        return
+    now = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+    cursor.execute('''INSERT INTO masters
+                    (user_id, name, service, phone, districts, price_min, price_max,
+                     experience, bio, portfolio, documents, entity_type, verification_type,
+                     documents_list, payment_methods, preferred_contact, age_group,
+                     source, status, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                    (0,  # user_id = 0 для мастеров без Telegram
+                     data['name'],
+                     data.get('services', data.get('profiles', '')),
+                     data['phone'],
+                     data['districts'],
+                     data['price_min'],
+                     data.get('price_max', ''),
+                     data['experience'],
+                     data.get('bio', 'Не указано'),
+                     data.get('portfolio', 'Не указано'),
+                     data.get('documents', 'Не указано'),
+                     data.get('entity_type', 'individual'),
+                     'simple',  # verification_type
+                     data.get('documents_list', ''),
+                     data.get('payment_methods', ''),
+                     data.get('preferred_contact', 'telegram'),
+                     data.get('age_group', ''),
+                     'manual',  # source
+                     'активен',
+                     now))
+    conn.commit()
+    master_id = cursor.lastrowid
+    bot.edit_message_text(
+        f"✅ Мастер успешно добавлен в базу с ID {master_id}.",
+        call.message.chat.id,
+        call.message.message_id
+    )
+    # Опубликуем карточку в канале
+    publish_master_card(master_id, data['name'], data.get('services', data.get('profiles', '')),
+                        data['districts'], data['price_min'], data['experience'],
+                        data.get('bio', 'Не указано'), data.get('portfolio', 'Не указано'))
+    del bot.admin_add_data[user_id]
+    bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda call: call.data == "admin_cancel_add")
+def admin_cancel_add_callback(call):
+    if call.from_user.id != ADMIN_ID:
+        bot.answer_callback_query(call.id, "❌ Нет прав")
+        return
+    user_id = call.from_user.id
+    if user_id in bot.admin_add_data:
+        del bot.admin_add_data[user_id]
+    bot.edit_message_text("❌ Добавление мастера отменено.", call.message.chat.id, call.message.message_id)
+    bot.answer_callback_query(call.id)
+
 # ================ ЗАПУСК БОТА ================
 if __name__ == '__main__':
     print("🚀 Бот запускается...")
