@@ -1468,36 +1468,38 @@ def process_edit_field_value(message, field, user_id):
 @bot.callback_query_handler(func=lambda call: call.data.startswith('send_docs_'))
 def send_docs_callback(call):
     app_id = int(call.data.split('_')[2])
+    user_id = call.from_user.id
     bot.send_message(
         call.message.chat.id,
         "📎 Отправьте фото/скан документов (можно несколько). После отправки администратор получит их."
     )
-    bot.register_next_step_handler(call.message, process_docs_for_verification, app_id)
+    bot.register_next_step_handler(call.message, process_docs_for_verification, app_id, user_id)
     bot.answer_callback_query(call.id)
 
-# ================ ОБРАБОТЧИК ОТПРАВКИ ФОТО ДЛЯ ПОРТФОЛИО ================
-@bot.callback_query_handler(func=lambda call: call.data.startswith('send_photo_'))
-def send_photo_callback(call):
-    app_id = int(call.data.split('_')[2])
-    bot.send_message(
-        call.message.chat.id,
-        "📸 Отправьте фото/видео для портфолио. Администратор получит их и создаст ссылку."
-    )
-    bot.register_next_step_handler(call.message, process_photo_for_portfolio, app_id)
-    bot.answer_callback_query(call.id)
-
-def process_photo_for_portfolio(message, app_id):
+def process_docs_for_verification(message, app_id, user_id):
     if message.photo:
         file_id = message.photo[-1].file_id
         bot.send_photo(
             ADMIN_ID,
             file_id,
-            caption=f"📸 Портфолио от мастера (заявка #{app_id})"
+            caption=f"📎 Документы от мастера (заявка #{app_id})"
         )
-        bot.send_message(message.chat.id, "✅ Фото отправлено администратору.")
+        bot.send_message(message.chat.id, "✅ Документы отправлены администратору. После проверки ваш статус будет обновлён.")
+        # Проверяем, хотел ли мастер отправить фото позже
+        # Данные мастера могут быть уже удалены из bot.master_data, но мы можем сохранить флаг в user_data
+        # Для простоты будем считать, что если флаг был, он сохранился в БД? Нет.
+        # Лучше после отправки документов спросить, хочет ли мастер отправить фото.
+        # Добавим кнопку "Отправить фото для портфолио"
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("📸 Отправить фото для портфолио", callback_data=f"send_photo_{app_id}"))
+        bot.send_message(
+            message.chat.id,
+            "Если вы хотите добавить фото в портфолио, нажмите кнопку ниже.",
+            reply_markup=markup
+        )
     else:
         bot.send_message(message.chat.id, "❌ Пожалуйста, отправьте фото.")
-        bot.register_next_step_handler(message, process_photo_for_portfolio, app_id)
+        bot.register_next_step_handler(message, process_docs_for_verification, app_id, user_id)
 
 def process_docs_for_verification(message, app_id):
     if message.photo:
