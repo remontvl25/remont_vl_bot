@@ -758,24 +758,6 @@ def process_master_name(message):
     user_id = message.from_user.id
     bot.master_data[user_id]['name'] = name
 
-    msg = bot.send_message(
-        message.chat.id,
-        "👷 **Шаг 3 из 16**\n\n"
-        "👇 **ВЫБЕРИТЕ СПЕЦИАЛИЗАЦИЮ:**\n\n"
-        "Введите цифру или название (можно несколько через запятую):\n"
-        "1 - Сантехник\n"
-        "2 - Электрик\n"
-        "3 - Отделочник\n"
-        "4 - Строитель\n"
-        "5 - Сварщик\n"
-        "6 - Разнорабочий\n"
-        "7 - Другое\n"
-        "8 - Дизайнер интерьера\n"
-        "9 - Полный комплекс\n\n"
-        "👉 Пример: `1, 3, 8` или `сантехник, электрик, дизайнер`"
-    )
-    ask_services_multiple(message.chat.id, user_id)
-
 def ask_services_multiple(chat_id, user_id):
     markup = types.InlineKeyboardMarkup(row_width=1)
     if 'selected_services' not in bot.master_data[user_id]:
