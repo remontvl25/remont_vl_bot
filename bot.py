@@ -300,7 +300,6 @@ DOC_TYPES_DICT = {code: name for code, name in DOC_TYPES}
 # Способы оплаты
 PAYMENT_METHODS = [
     ("cash", "Наличные"),
-    ("card", "Карта"),
     ("transfer", "Перевод на карту"),
     ("account", "Расчётный счёт")
 ]
@@ -586,12 +585,16 @@ def guest_register(message):
 if not hasattr(bot, 'master_data'):
     bot.master_data = {}
 
+# ================ АНКЕТА МАСТЕРА (НОВЫЙ ПОРЯДОК) ================
+if not hasattr(bot, 'master_data'):
+    bot.master_data = {}
+
 def become_master(message, verif_type='simple'):
     if not only_private(message):
         return
     user_id = message.from_user.id
 
-    # Проверка на существующую анкету (дублируем для надёжности)
+    # Проверка на существующую анкету
     st, _ = get_master_status(user_id)
     if st is not None:
         bot.send_message(message.chat.id, "❌ У вас уже есть анкета. Используйте меню для управления.")
@@ -650,11 +653,46 @@ def process_master_name(message):
         bot.master_data[user_id] = {}
     bot.master_data[user_id]['name'] = name
 
-    # Переходим к выбору возраста
+    # Переходим к выбору возраста (шаг 3)
     ask_age(message.chat.id, user_id)
 
+def ask_age(chat_id, user_id):
+    markup = types.InlineKeyboardMarkup(row_width=3)
+    markup.add(
+        types.InlineKeyboardButton("до 25 лет", callback_data="age_under25"),
+        types.InlineKeyboardButton("25-35 лет", callback_data="age_25_35"),
+        types.InlineKeyboardButton("35-50 лет", callback_data="age_35_50"),
+        types.InlineKeyboardButton("старше 50", callback_data="age_over50"),
+        types.InlineKeyboardButton("⏩ Пропустить", callback_data="age_skip")
+    )
+    bot.send_message(
+        chat_id,
+        "🎂 **Шаг 3 из 16**\n\n"
+        "Укажите ваш возраст (необязательно). Это поможет клиентам лучше узнать вас.",
+        reply_markup=markup
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('age_'))
+def age_callback(call):
+    user_id = call.from_user.id
+    if user_id not in bot.master_data:
+        bot.answer_callback_query(call.id, "❌ Начните анкету заново")
+        return
+    age_map = {
+        'under25': 'до 25',
+        '25_35': '25-35',
+        '35_50': '35-50',
+        'over50': 'старше 50',
+        'skip': ''
+    }
+    key = call.data[4:]
+    bot.master_data[user_id]['age_group'] = age_map.get(key, '')
+    bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+    # Переходим к выбору профилей (шаг 4)
+    ask_profiles_multiple(call.message.chat.id, user_id)
+    bot.answer_callback_query(call.id)
+
 def ask_profiles_multiple(chat_id, user_id):
-    print(f"DEBUG: ask_profiles_multiple вызвана для user {user_id}")
     markup = types.InlineKeyboardMarkup(row_width=1)
     if 'selected_profiles' not in bot.master_data[user_id]:
         bot.master_data[user_id]['selected_profiles'] = []
@@ -668,7 +706,7 @@ def ask_profiles_multiple(chat_id, user_id):
     markup.add(types.InlineKeyboardButton("✅ Готово", callback_data="prof_done"))
     bot.send_message(
         chat_id,
-        "👷 **Шаг 3 из 16**\n\n"
+        "👷 **Шаг 4 из 16**\n\n"
         "Выберите **профили**, по которым вы работаете (можно несколько). "
         "Именно по ним будут приходить заявки от клиентов.\n\n"
         "⚠️ Вы можете заполнить только одну анкету. Позже её можно будет редактировать или отозвать.",
@@ -688,14 +726,13 @@ def profile_callback(call):
             bot.answer_callback_query(call.id, "❌ Выберите хотя бы один профиль")
             return
         bot.master_data[user_id]['profiles'] = ", ".join(selected)
-        # Для совместимости со старым кодом оставим поле service
         bot.master_data[user_id]['service'] = selected[0]
         bot.master_data[user_id]['services'] = ", ".join(selected)
         bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
-        # Переходим к телефону
+        # Переходим к телефону (шаг 5)
         bot.send_message(
             call.message.chat.id,
-            "📞 **Шаг 4 из 16**\n\n"
+            "📞 **Шаг 5 из 16**\n\n"
             "Введите ваш телефон (будет виден только администратору):"
         )
         bot.register_next_step_handler(call.message, process_master_phone)
@@ -723,7 +760,7 @@ def process_master_phone(message):
         return
     user_id = message.from_user.id
     bot.master_data[user_id]['phone'] = phone
-    # Выбор районов (множественный)
+    # Выбор районов (шаг 6)
     ask_districts_multiple(message.chat.id, user_id)
 
 def ask_districts_multiple(chat_id, user_id):
@@ -740,7 +777,7 @@ def ask_districts_multiple(chat_id, user_id):
     markup.add(types.InlineKeyboardButton("✅ Готово", callback_data="dist_done"))
     bot.send_message(
         chat_id,
-        "📍 **Шаг 5 из 16**\n\n**Выберите районы работы** (можно несколько):",
+        "📍 **Шаг 6 из 16**\n\n**Выберите районы работы** (можно несколько):",
         reply_markup=markup
     )
 
@@ -758,10 +795,10 @@ def district_callback(call):
             return
         bot.master_data[user_id]['districts'] = ", ".join(selected)
         bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
-        # Переходим к цене
+        # Переходим к цене (шаг 7)
         bot.send_message(
             call.message.chat.id,
-            "💰 **Шаг 6 из 16**\n\n"
+            "💰 **Шаг 7 из 16**\n\n"
             "Введите **минимальную цену заказа** (например: 1000₽, договорная):"
         )
         bot.register_next_step_handler(call.message, process_master_price_min)
@@ -790,8 +827,56 @@ def process_master_price_min(message):
     user_id = message.from_user.id
     bot.master_data[user_id]['price_min'] = price_min
     bot.master_data[user_id]['price_max'] = ''
-    # Переходим к способам оплаты
+    # Переходим к способам оплаты (шаг 8)
     ask_payment_methods(message.chat.id, user_id)
+
+def ask_payment_methods(chat_id, user_id):
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    if 'selected_payments' not in bot.master_data[user_id]:
+        bot.master_data[user_id]['selected_payments'] = []
+    selected = bot.master_data[user_id]['selected_payments']
+    # Используем обновлённый список без "Карта" и "Криптовалюта"
+    for code, name in PAYMENT_METHODS:
+        prefix = "✅ " if name in selected else ""
+        markup.add(types.InlineKeyboardButton(
+            f"{prefix}{name}",
+            callback_data=f"pay_{code}"
+        ))
+    markup.add(types.InlineKeyboardButton("✅ Готово", callback_data="pay_done"))
+    bot.send_message(
+        chat_id,
+        "💳 **Шаг 8 из 16**\n\n"
+        "Какие способы оплаты вы принимаете? (можно несколько)",
+        reply_markup=markup
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('pay_'))
+def payment_callback(call):
+    user_id = call.from_user.id
+    if user_id not in bot.master_data:
+        bot.answer_callback_query(call.id, "❌ Начните анкету заново")
+        return
+    data = call.data[4:]  # убираем 'pay_'
+    if data == "done":
+        selected = bot.master_data[user_id].get('selected_payments', [])
+        bot.master_data[user_id]['payment_methods'] = ", ".join(selected)
+        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+        # Переходим к опыту (шаг 9)
+        ask_experience(call.message.chat.id, user_id)
+        bot.answer_callback_query(call.id, "✅ Способы оплаты сохранены")
+    else:
+        pay_name = PAYMENT_DICT.get(data)
+        if not pay_name:
+            bot.answer_callback_query(call.id, "❌ Ошибка")
+            return
+        selected = bot.master_data[user_id].get('selected_payments', [])
+        if pay_name in selected:
+            selected.remove(pay_name)
+        else:
+            selected.append(pay_name)
+        bot.master_data[user_id]['selected_payments'] = selected
+        ask_payment_methods(call.message.chat.id, user_id)
+        bot.answer_callback_query(call.id)
 
 def ask_experience(chat_id, user_id):
     markup = types.InlineKeyboardMarkup(row_width=1)
@@ -799,7 +884,7 @@ def ask_experience(chat_id, user_id):
         markup.add(types.InlineKeyboardButton(name, callback_data=f"exp_{code}"))
     bot.send_message(
         chat_id,
-        "⏱️ **Шаг 7 из 16**\n\nВыберите ваш опыт работы:",
+        "⏱️ **Шаг 9 из 16**\n\nВыберите ваш опыт работы:",
         reply_markup=markup
     )
 
@@ -822,7 +907,7 @@ def experience_callback(call):
         exp_map = {k: v for k, v in EXPERIENCE_OPTIONS if k != "custom"}
         bot.master_data[user_id]['experience'] = exp_map[code]
         bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
-        # Переходим к био
+        # Переходим к био (шаг 10)
         ask_bio(call.message.chat.id, user_id)
         bot.answer_callback_query(call.id)
 
@@ -839,7 +924,7 @@ def ask_bio(chat_id, user_id):
     markup.add(types.InlineKeyboardButton("⏩ Пропустить", callback_data="skip_bio"))
     bot.send_message(
         chat_id,
-        "📝 **Шаг 8 из 16**\n\n"
+        "📝 **Шаг 10 из 16**\n\n"
         "👇 **КОММЕНТАРИЙ О СЕБЕ (кратко):**\n\n"
         "Расскажите о себе пару слов: опыт, подход к работе.\n"
         "Это увидят клиенты в вашей карточке.\n\n"
@@ -874,7 +959,7 @@ def ask_portfolio(chat_id, user_id):
     markup.add(types.InlineKeyboardButton("📤 Отправить фото админу", callback_data="portfolio_send_to_admin"))
     bot.send_message(
         chat_id,
-        "📸 **Шаг 9 из 16**\n\n"
+        "📸 **Шаг 11 из 16**\n\n"
         "👇 **ОТПРАВЬТЕ ССЫЛКУ НА ПОРТФОЛИО:**\n\n"
         "Это может быть ссылка на Яндекс.Диск, Google Фото, Telegram-канал с работами.\n"
         "Если у вас нет ссылки, вы можете отправить фото администратору – он создаст ссылку.\n\n"
@@ -902,7 +987,7 @@ def skip_portfolio_callback(call):
         bot.answer_callback_query(call.id, "❌ Начните анкету заново")
         return
     bot.master_data[user_id]['portfolio'] = "Не указано"
-    show_documents_buttons(call.message.chat.id, user_id)
+    show_documents_buttons(call.message.chat.id, user_id)   # Переход к документам
     bot.answer_callback_query(call.id, "⏩ Пропущено")
 
 @bot.callback_query_handler(func=lambda call: call.data == 'portfolio_send_to_admin')
@@ -912,8 +997,8 @@ def portfolio_send_to_admin_callback(call):
         bot.master_data[user_id] = {}
     bot.master_data[user_id]['send_portfolio_later'] = True
     bot.answer_callback_query(call.id, "✅ Вы сможете отправить фото после заполнения анкеты.")
-    # Переходим к следующему шагу (возраст)
-    ask_age(call.message.chat.id, user_id)
+    # Переходим к следующему шагу (документы)
+    show_documents_buttons(call.message.chat.id, user_id)
 
 def process_master_portfolio_text(message, user_id):
     if message.chat.type != 'private':
@@ -922,43 +1007,7 @@ def process_master_portfolio_text(message, user_id):
     if not portfolio or portfolio.lower() == "пропустить":
         portfolio = "Не указано"
     bot.master_data[user_id]['portfolio'] = portfolio
-    show_documents_buttons(message.chat.id, user_id)
-
-def ask_age(chat_id, user_id):
-    markup = types.InlineKeyboardMarkup(row_width=3)
-    markup.add(
-        types.InlineKeyboardButton("до 25 лет", callback_data="age_under25"),
-        types.InlineKeyboardButton("25-35 лет", callback_data="age_25_35"),
-        types.InlineKeyboardButton("35-50 лет", callback_data="age_35_50"),
-        types.InlineKeyboardButton("старше 50", callback_data="age_over50"),
-        types.InlineKeyboardButton("⏩ Пропустить", callback_data="age_skip")
-    )
-    bot.send_message(
-        chat_id,
-        "🎂 **Шаг 10 из 16**\n\n"
-        "Укажите ваш возраст (необязательно). Это поможет клиентам лучше узнать вас.",
-        reply_markup=markup
-    )
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith('age_'))
-def age_callback(call):
-    user_id = call.from_user.id
-    if user_id not in bot.master_data:
-        bot.answer_callback_query(call.id, "❌ Начните анкету заново")
-        return
-    age_map = {
-        'under25': 'до 25',
-        '25_35': '25-35',
-        '35_50': '35-50',
-        'over50': 'старше 50',
-        'skip': ''
-    }
-    key = call.data[4:]
-    bot.master_data[user_id]['age_group'] = age_map.get(key, '')
-    bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
-    # Переходим к выбору профилей
-    ask_profiles_multiple(call.message.chat.id, user_id)
-    bot.answer_callback_query(call.id)
+    show_documents_buttons(message.chat.id, user_id)   # Переход к документам
 
 def show_documents_buttons(chat_id, user_id):
     markup = types.InlineKeyboardMarkup(row_width=3)
@@ -969,7 +1018,7 @@ def show_documents_buttons(chat_id, user_id):
     )
     bot.send_message(
         chat_id,
-        "📄 **Шаг 11 из 16**\n\n"
+        "📄 **Шаг 12 из 16**\n\n"
         "Используете ли вы в работе какие-либо документы (договор, акт, чек, счёт и т.п.)?\n\n"
         "👉 **Выберите вариант:**",
         reply_markup=markup
@@ -985,17 +1034,17 @@ def documents_callback(call):
     if choice == 'yes':
         bot.master_data[user_id]['documents'] = "Есть"
         bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
-        ask_doc_types_multiple(call.message.chat.id, user_id)
+        ask_doc_types_multiple(call.message.chat.id, user_id)   # Шаг 13
     elif choice == 'no':
         bot.master_data[user_id]['documents'] = "Нет"
         bot.master_data[user_id]['documents_list'] = ""
         bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
-        ask_documents_verification(call.message, user_id)
+        ask_documents_verification(call.message, user_id)       # Шаг 14
     else:  # skip
         bot.master_data[user_id]['documents'] = "Пропустить"
         bot.master_data[user_id]['documents_list'] = ""
         bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
-        ask_documents_verification(call.message, user_id)
+        ask_documents_verification(call.message, user_id)       # Шаг 14
     bot.answer_callback_query(call.id)
 
 def ask_doc_types_multiple(chat_id, user_id):
@@ -1012,7 +1061,8 @@ def ask_doc_types_multiple(chat_id, user_id):
     markup.add(types.InlineKeyboardButton("✅ Готово", callback_data="doc_type_done"))
     bot.send_message(
         chat_id,
-        "📄 **Какие документы вы можете предоставить при работе?** (можно несколько):",
+        "📄 **Шаг 13 из 16**\n\n"
+        "Какие документы вы можете предоставить при работе? (можно несколько):",
         reply_markup=markup
     )
 
@@ -1027,7 +1077,7 @@ def doc_type_callback(call):
         selected = bot.master_data[user_id].get('selected_docs', [])
         bot.master_data[user_id]['documents_list'] = ", ".join(selected)
         bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
-        ask_documents_verification(call.message, user_id)
+        ask_documents_verification(call.message, user_id)       # Шаг 14
         bot.answer_callback_query(call.id, "✅ Список документов сохранён")
     else:
         doc_name = DOC_TYPES_DICT.get(data)
@@ -1040,7 +1090,7 @@ def doc_type_callback(call):
         else:
             selected.append(doc_name)
         bot.master_data[user_id]['selected_docs'] = selected
-        ask_doc_types_multiple(call.message.chat.id, user_id)   # ← здесь перерисовка, а не переход
+        ask_doc_types_multiple(call.message.chat.id, user_id)   # перерисовка
         bot.answer_callback_query(call.id)
 
 def ask_documents_verification(message, user_id):
@@ -1051,7 +1101,7 @@ def ask_documents_verification(message, user_id):
     )
     bot.send_message(
         message.chat.id,
-        "🛡️ **Шаг 12 из 16**\n\n"
+        "🛡️ **Шаг 14 из 16**\n\n"
         "Готовы ли вы предоставить администратору документы для проверки (в том числе паспорт)?\n"
         "Если да, после проверки ваша карточка получит статус «Документы проверены».",
         reply_markup=markup
@@ -1060,7 +1110,6 @@ def ask_documents_verification(message, user_id):
 @bot.callback_query_handler(func=lambda call: call.data.startswith('verify_'))
 def verify_callback(call):
     user_id = call.from_user.id
-    print(f"DEBUG: verify_callback для user {user_id}")
     if user_id not in bot.master_data:
         bot.answer_callback_query(call.id, "❌ Начните анкету заново")
         return
@@ -1069,8 +1118,8 @@ def verify_callback(call):
     else:
         bot.master_data[user_id]['documents_verified'] = 'no'
     bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+    # Переходим к выбору способов связи (шаг 15)
     ask_contact_methods(call.message.chat.id, user_id)
-    print("DEBUG: ask_contact_methods вызвана")
     bot.answer_callback_query(call.id)
 
 def ask_contact_methods(chat_id, user_id):
@@ -1087,7 +1136,7 @@ def ask_contact_methods(chat_id, user_id):
     markup.add(types.InlineKeyboardButton("✅ Готово", callback_data="contact_done"))
     bot.send_message(
         chat_id,
-        "📞 **Шаг 13 из 16**\n\n"
+        "📞 **Шаг 15 из 16**\n\n"
         "Выберите предпочтительные способы связи (можно несколько):",
         reply_markup=markup
     )
@@ -1106,11 +1155,10 @@ def contact_callback(call):
             return
         bot.master_data[user_id]['preferred_contact'] = ", ".join(selected)
         bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
-        # Переходим к способам оплаты
-        ask_payment_methods(call.message.chat.id, user_id)
+        # Переходим к сводке (шаг 16)
+        show_summary(call.message, user_id)
         bot.answer_callback_query(call.id, "✅ Способы связи сохранены")
     else:
-        # Преобразуем код в название
         contact_names = {"telegram": "Telegram", "whatsapp": "WhatsApp", "phone": "Телефонный звонок"}
         contact_name = contact_names.get(data)
         if not contact_name:
@@ -1123,53 +1171,6 @@ def contact_callback(call):
             selected.append(contact_name)
         bot.master_data[user_id]['selected_contacts'] = selected
         ask_contact_methods(call.message.chat.id, user_id)
-        bot.answer_callback_query(call.id)
-
-def ask_payment_methods(chat_id, user_id):
-    markup = types.InlineKeyboardMarkup(row_width=1)
-    if 'selected_payments' not in bot.master_data[user_id]:
-        bot.master_data[user_id]['selected_payments'] = []
-    selected = bot.master_data[user_id]['selected_payments']
-    for code, name in PAYMENT_METHODS:
-        prefix = "✅ " if name in selected else ""
-        markup.add(types.InlineKeyboardButton(
-            f"{prefix}{name}",
-            callback_data=f"pay_{code}"
-        ))
-    markup.add(types.InlineKeyboardButton("✅ Готово", callback_data="pay_done"))
-    bot.send_message(
-        chat_id,
-        "💳 **Шаг 14 из 16**\n\n"
-        "Какие способы оплаты вы принимаете? (можно несколько)",
-        reply_markup=markup
-    )
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith('pay_'))
-def payment_callback(call):
-    user_id = call.from_user.id
-    if user_id not in bot.master_data:
-        bot.answer_callback_query(call.id, "❌ Начните анкету заново")
-        return
-    data = call.data[4:]  # убираем 'pay_'
-    if data == "done":
-        selected = bot.master_data[user_id].get('selected_payments', [])
-        bot.master_data[user_id]['payment_methods'] = ", ".join(selected)
-        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
-        # Переходим к выбору опыта
-        ask_experience(call.message.chat.id, user_id)
-        bot.answer_callback_query(call.id, "✅ Способы оплаты сохранены")
-    else:
-        pay_name = PAYMENT_DICT.get(data)
-        if not pay_name:
-            bot.answer_callback_query(call.id, "❌ Ошибка")
-            return
-        selected = bot.master_data[user_id].get('selected_payments', [])
-        if pay_name in selected:
-            selected.remove(pay_name)
-        else:
-            selected.append(pay_name)
-        bot.master_data[user_id]['selected_payments'] = selected
-        ask_payment_methods(call.message.chat.id, user_id)
         bot.answer_callback_query(call.id)
 
 def show_summary(message, user_id):
@@ -1194,10 +1195,32 @@ def show_summary(message, user_id):
     """
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("✅ Отправить на модерацию", callback_data=f"save_app_{user_id}"))
-    # Кнопка отмены (можно добавить)
     markup.add(types.InlineKeyboardButton("❌ Отмена", callback_data="cancel_app"))
     bot.send_message(message.chat.id, summary, reply_markup=markup)
 
+@bot.callback_query_handler(func=lambda call: call.data.startswith('save_app_'))
+def save_app_callback(call):
+    user_id = int(call.data.split('_')[2])
+    if call.from_user.id != user_id:
+        bot.answer_callback_query(call.id, "❌ Это не ваша анкета")
+        return
+    user_data = bot.master_data[user_id]
+    try:
+        save_master_application(call.message, user_id, user_data)
+        bot.answer_callback_query(call.id, "✅ Анкета отправлена!")
+    except Exception as e:
+        bot.answer_callback_query(call.id, "❌ Ошибка сохранения")
+        bot.send_message(call.message.chat.id, f"❌ Ошибка: {e}")
+        import traceback
+        traceback.print_exc()
+
+@bot.callback_query_handler(func=lambda call: call.data == 'cancel_app')
+def cancel_app_callback(call):
+    user_id = call.from_user.id
+    if user_id in bot.master_data:
+        del bot.master_data[user_id]
+    bot.edit_message_text("❌ Создание анкеты отменено.", call.message.chat.id, call.message.message_id)
+    bot.answer_callback_query(call.id)
 @bot.callback_query_handler(func=lambda call: call.data.startswith('save_app_'))
 def save_app_callback(call):
     user_id = int(call.data.split('_')[2])
