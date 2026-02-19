@@ -963,15 +963,14 @@ def age_callback(call):
 def show_documents_buttons(chat_id, user_id):
     markup = types.InlineKeyboardMarkup(row_width=3)
     markup.add(
-        types.InlineKeyboardButton("✅ Есть документы", callback_data="doc_yes"),
-        types.InlineKeyboardButton("❌ Нет документов", callback_data="doc_no"),
+        types.InlineKeyboardButton("✅ Да, использую", callback_data="doc_yes"),
+        types.InlineKeyboardButton("❌ Нет, не использую", callback_data="doc_no"),
         types.InlineKeyboardButton("⏩ Пропустить", callback_data="doc_skip")
     )
     bot.send_message(
         chat_id,
         "📄 **Шаг 11 из 16**\n\n"
-        "👇 **ПОДТВЕРЖДАЮЩИЕ ДОКУМЕНТЫ:**\n\n"
-        "Какие документы вы можете предоставить при работе?\n\n"
+        "Используете ли вы в работе какие-либо документы (договор, акт, чек, счёт и т.п.)?\n\n"
         "👉 **Выберите вариант:**",
         reply_markup=markup
     )
@@ -1061,6 +1060,7 @@ def ask_documents_verification(message, user_id):
 @bot.callback_query_handler(func=lambda call: call.data.startswith('verify_'))
 def verify_callback(call):
     user_id = call.from_user.id
+    print(f"DEBUG: verify_callback для user {user_id}")
     if user_id not in bot.master_data:
         bot.answer_callback_query(call.id, "❌ Начните анкету заново")
         return
@@ -1069,8 +1069,8 @@ def verify_callback(call):
     else:
         bot.master_data[user_id]['documents_verified'] = 'no'
     bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
-    # Переходим к выбору способов связи (множественный)
     ask_contact_methods(call.message.chat.id, user_id)
+    print("DEBUG: ask_contact_methods вызвана")
     bot.answer_callback_query(call.id)
 
 def ask_contact_methods(chat_id, user_id):
