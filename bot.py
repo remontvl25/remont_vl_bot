@@ -2568,8 +2568,8 @@ def admin_callback(call):
         bot.send_message(call.message.chat.id, "✅ Отложенные заявки опубликованы.")
         bot.answer_callback_query(call.id)
     elif cmd == 'manual_add':
-    start_manual_master_add(call)        
-
+        start_manual_master_add(call)
+        
 def get_stats():
     cursor.execute("SELECT COUNT(*) FROM users")
     total_users = cursor.fetchone()[0]
