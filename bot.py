@@ -909,19 +909,12 @@ def skip_portfolio_callback(call):
 @bot.callback_query_handler(func=lambda call: call.data == 'portfolio_send_to_admin')
 def portfolio_send_to_admin_callback(call):
     user_id = call.from_user.id
-    bot.send_message(
-        call.message.chat.id,
-        "📤 Вы можете отправить фото/видео своих работ администратору, нажав на кнопку ниже.\n\n"
-        "После получения администратор создаст ссылку и добавит её в вашу анкету, либо вы сможете добавить её позже через редактирование.",
-        reply_markup=types.InlineKeyboardMarkup().add(
-            types.InlineKeyboardButton("✉️ Написать администратору", url=f"tg://user?id={ADMIN_ID}")
-        )
-    )
-    bot.send_message(
-        ADMIN_ID,
-        f"🔔 Мастер @{call.from_user.username or 'нет'} (ID {user_id}) хочет отправить фото для портфолио. Свяжитесь с ним."
-    )
-    bot.answer_callback_query(call.id)
+    if user_id not in bot.master_data:
+        bot.master_data[user_id] = {}
+    bot.master_data[user_id]['send_portfolio_later'] = True
+    bot.answer_callback_query(call.id, "✅ Вы сможете отправить фото после заполнения анкеты.")
+    # Переходим к следующему шагу (возраст)
+    ask_age(call.message.chat.id, user_id)
 
 def process_master_portfolio_text(message, user_id):
     if message.chat.type != 'private':
@@ -1329,7 +1322,15 @@ def save_master_application(message, user_id, user_data):
             "Вы выбрали вариант с проверкой документов. Вы можете отправить фото/скан документов администратору прямо сейчас.",
             reply_markup=markup
         )
-
+    # Предложение отправить фото для портфолио
+    if user_data.get('send_portfolio_later'):
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("📤 Отправить фото админу", callback_data=f"send_photo_{application_id}"))
+        bot.send_message(
+            message.chat.id,
+            "Вы хотели отправить фото для портфолио. Сделайте это сейчас:",
+            reply_markup=markup
+        )
     # Очистка временных данных
     if user_id in bot.master_data:
         del bot.master_data[user_id]
@@ -1344,6 +1345,28 @@ def send_docs_callback(call):
     )
     bot.register_next_step_handler(call.message, process_docs_for_verification, app_id)
     bot.answer_callback_query(call.id)
+    @bot.callback_query_handler(func=lambda call: call.data.startswith('send_photo_'))
+def send_photo_callback(call):
+    app_id = int(call.data.split('_')[2])
+    bot.send_message(
+        call.message.chat.id,
+        "📸 Отправьте фото/видео для портфолио. Администратор получит их и создаст ссылку."
+    )
+    bot.register_next_step_handler(call.message, process_photo_for_portfolio, app_id)
+    bot.answer_callback_query(call.id)
+
+def process_photo_for_portfolio(message, app_id):
+    if message.photo:
+        file_id = message.photo[-1].file_id
+        bot.send_photo(
+            ADMIN_ID,
+            file_id,
+            caption=f"📸 Портфолио от мастера (заявка #{app_id})"
+        )
+        bot.send_message(message.chat.id, "✅ Фото отправлено администратору.")
+    else:
+        bot.send_message(message.chat.id, "❌ Пожалуйста, отправьте фото.")
+        bot.register_next_step_handler(message, process_photo_for_portfolio, app_id)
 
 def process_docs_for_verification(message, app_id):
     if message.photo:
