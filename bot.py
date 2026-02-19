@@ -639,7 +639,6 @@ def entity_callback(call):
     bot.answer_callback_query(call.id)
 
 def process_master_name(message):
-    print(f"DEBUG: process_master_name вызвана для user {message.from_user.id}")
     if message.chat.type != 'private':
         return
     name = safe_text(message)
@@ -647,10 +646,12 @@ def process_master_name(message):
         bot.send_message(message.chat.id, "❌ Пожалуйста, введите имя/название.")
         return
     user_id = message.from_user.id
+    if user_id not in bot.master_data:
+        bot.master_data[user_id] = {}
     bot.master_data[user_id]['name'] = name
 
-    # Переходим к выбору профилей (множественный)
-    ask_profiles_multiple(message.chat.id, user_id)
+    # Переходим к выбору возраста
+    ask_age(message.chat.id, user_id)
 
 def ask_profiles_multiple(chat_id, user_id):
     print(f"DEBUG: ask_profiles_multiple вызвана для user {user_id}")
@@ -788,10 +789,9 @@ def process_master_price_min(message):
         return
     user_id = message.from_user.id
     bot.master_data[user_id]['price_min'] = price_min
-    # Цена максимальная больше не запрашивается, просто ставим пустую строку
     bot.master_data[user_id]['price_max'] = ''
-    # Переходим к опыту (выбор кнопками)
-    ask_experience(message.chat.id, user_id)
+    # Переходим к способам оплаты
+    ask_payment_methods(message.chat.id, user_id)
 
 def ask_experience(chat_id, user_id):
     markup = types.InlineKeyboardMarkup(row_width=1)
@@ -956,7 +956,8 @@ def age_callback(call):
     key = call.data[4:]
     bot.master_data[user_id]['age_group'] = age_map.get(key, '')
     bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
-    show_documents_buttons(call.message.chat.id, user_id)
+    # Переходим к выбору профилей
+    ask_profiles_multiple(call.message.chat.id, user_id)
     bot.answer_callback_query(call.id)
 
 def show_documents_buttons(chat_id, user_id):
@@ -1151,11 +1152,12 @@ def payment_callback(call):
         return
     data = call.data[4:]  # убираем 'pay_'
     if data == "done":
-        selected = bot.master_data[user_id].get('selected_payments', [])
-        bot.master_data[user_id]['payment_methods'] = ", ".join(selected)
-        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
-        show_summary(call.message, user_id)
-        bot.answer_callback_query(call.id, "✅ Способы оплаты сохранены")
+    selected = bot.master_data[user_id].get('selected_payments', [])
+    bot.master_data[user_id]['payment_methods'] = ", ".join(selected)
+    bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+    # Переходим к выбору опыта
+    ask_experience(call.message.chat.id, user_id)
+    bot.answer_callback_query(call.id, "✅ Способы оплаты сохранены")
     else:
         pay_name = PAYMENT_DICT.get(data)
         if not pay_name:
