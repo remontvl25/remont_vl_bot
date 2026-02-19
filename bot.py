@@ -1466,7 +1466,15 @@ def process_docs_for_verification(message, app_id, user_id):
     else:
         bot.send_message(message.chat.id, "❌ Пожалуйста, отправьте фото.")
         bot.register_next_step_handler(message, process_docs_for_verification, app_id, user_id)
-
+        
+@bot.callback_query_handler(func=lambda call: call.data == 'finish_docs')
+def finish_docs_callback(call):
+    bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+    bot.send_message(call.message.chat.id, "✅ Вы завершили отправку документов. Спасибо!")
+    # Возвращаем в главное меню
+    show_role_menu(call.message, 'master')
+    bot.answer_callback_query(call.id)
+    
 @bot.callback_query_handler(func=lambda call: call.data.startswith('send_photo_'))
 def send_photo_callback(call):
     app_id = int(call.data.split('_')[2])
