@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 import telebot
 from telebot import types
+print("🚀 Бот запускается...")
 
 # ================ БЛОКИРОВКА ЗАПУСКА ВТОРОГО ЭКЗЕМПЛЯРА ================
 def single_instance():
