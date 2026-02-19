@@ -1151,12 +1151,13 @@ def payment_callback(call):
         bot.answer_callback_query(call.id, "❌ Начните анкету заново")
         return
     data = call.data[4:]  # убираем 'pay_'
-if data == "done":
-    selected = bot.master_data[user_id].get('selected_payments', [])
-    bot.master_data[user_id]['payment_methods'] = ", ".join(selected)
-    bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
-    ask_experience(call.message.chat.id, user_id)
-    bot.answer_callback_query(call.id, "✅ Способы оплаты сохранены")
+    if data == "done":
+        selected = bot.master_data[user_id].get('selected_payments', [])
+        bot.master_data[user_id]['payment_methods'] = ", ".join(selected)
+        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+        # Переходим к выбору опыта
+        ask_experience(call.message.chat.id, user_id)
+        bot.answer_callback_query(call.id, "✅ Способы оплаты сохранены")
     else:
         pay_name = PAYMENT_DICT.get(data)
         if not pay_name:
