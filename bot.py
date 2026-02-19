@@ -424,6 +424,7 @@ def show_role_menu(message, role):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
 
     # ================ СТАРТ / ВЫБОР РОЛИ ================
+# ================ СТАРТ / ВЫБОР РОЛИ ================
 @bot.message_handler(commands=['start'])
 def start(message):
     print(f"DEBUG: start вызван от user {message.from_user.id}")
