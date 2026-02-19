@@ -29,16 +29,16 @@ if not TOKEN:
     print("❌ Токен не найден в переменных окружения!")
     sys.exit(1)
 
-BOT_USERNAME = os.environ.get('BOT_USERNAME', 'masterVL25_bot')          # новый юзернейм бота
+BOT_USERNAME = os.environ.get('BOT_USERNAME', 'masterVL25_bot')
 CHANNEL_USERNAME = os.environ.get('CHANNEL_USERNAME', 'masterVL25')
 CHANNEL_ID = os.environ.get('CHANNEL_ID', '-1003711282924')
-CHAT_ID = os.environ.get('CHAT_ID', "@remontvl25chat")                     # общий чат (если есть)
-ADMIN_ID = int(os.environ.get('ADMIN_ID', '8111497942'))                  # ID админа
-ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', 'masterVL25_admin')     # новый юзернейм админа
-MASTER_CHAT_ID = os.environ.get('MASTER_CHAT_ID', '@remontvl25masters')
+CHAT_ID = os.environ.get('CHAT_ID', "@masterVL25_chat")
+ADMIN_ID = int(os.environ.get('ADMIN_ID', '8111497942'))
+ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', 'masterVL25_admin')
+MASTER_CHAT_ID = os.environ.get('MASTER_CHAT_ID', '@masterVL25_masters')
 MASTER_CHAT_INVITE_LINK = os.environ.get('MASTER_CHAT_INVITE_LINK', '')
 
-DB_PATH = os.environ.get('DB_PATH', '/app/data/remont.db')                # для Volume или просто remont.db
+DB_PATH = os.environ.get('DB_PATH', '/app/data/remont.db')
 
 NIGHT_START_HOUR = int(os.environ.get('NIGHT_START_HOUR', 23))
 NIGHT_END_HOUR = int(os.environ.get('NIGHT_END_HOUR', 7))
@@ -46,7 +46,7 @@ TIMEZONE_OFFSET = int(os.environ.get('TIMEZONE_OFFSET', 10))
 
 BOT_LINK = f"https://t.me/{BOT_USERNAME}"
 CHANNEL_LINK = f"https://t.me/{CHANNEL_USERNAME}"
-ADMIN_LINK = f"https://t.me/{ADMIN_USERNAME}"   # для текстовых ссылок
+ADMIN_LINK = f"https://t.me/{ADMIN_USERNAME}"
 
 bot = telebot.TeleBot(TOKEN)
 
@@ -261,7 +261,6 @@ conn.commit()
 
 # ================ СПИСКИ ДЛЯ ВЫБОРА ================
 
-# Профили (специализации)
 PROFILES = [
     ("plumber", "Сантехник"),
     ("electrician", "Электрик"),
@@ -275,7 +274,6 @@ PROFILES = [
 ]
 PROFILES_DICT = {code: name for code, name in PROFILES}
 
-# Районы города
 DISTRICTS = [
     ("center", "Центр"),
     ("sneg", "Снеговая Падь"),
@@ -286,7 +284,6 @@ DISTRICTS = [
 ]
 DISTRICTS_DICT = {code: name for code, name in DISTRICTS}
 
-# Типы документов для мастера
 DOC_TYPES = [
     ("contract", "Договор"),
     ("act", "Акт выполненных работ"),
@@ -298,7 +295,6 @@ DOC_TYPES = [
 ]
 DOC_TYPES_DICT = {code: name for code, name in DOC_TYPES}
 
-# Способы оплаты (без карты и криптовалюты)
 PAYMENT_METHODS = [
     ("cash", "Наличные"),
     ("transfer", "Перевод на карту"),
@@ -306,7 +302,6 @@ PAYMENT_METHODS = [
 ]
 PAYMENT_DICT = {code: name for code, name in PAYMENT_METHODS}
 
-# Варианты опыта работы
 EXPERIENCE_OPTIONS = [
     ("less1", "Менее 1 года"),
     ("1-3", "1–3 года"),
@@ -388,39 +383,7 @@ def publish_delayed_requests():
         except Exception as e:
             print(f"Ошибка публикации отложенной заявки {req_id}: {e}")
 
-def notify_masters_about_new_request(request_id, request_data):
-    """Уведомляет мастеров, чья специализация и районы соответствуют заявке."""
-    service = request_data['service'].lower()
-    district = request_data['district'].lower()
-
-    cursor.execute('''SELECT user_id, name, service, districts FROM masters WHERE status = 'активен' ''')
-    masters = cursor.fetchall()
-    notified = 0
-    for master in masters:
-        master_user_id, master_name, master_service, master_districts = master
-        # Проверяем совпадение профиля (по ключевым словам, можно точнее)
-        service_match = any(prof.strip().lower() in master_service.lower() for prof in service.split())
-        # Проверяем совпадение района (хотя бы один из районов мастера присутствует в district)
-        district_match = any(d.strip().lower() in district for d in master_districts.split(','))
-        if service_match and district_match:
-            try:
-                bot.send_message(
-                    master_user_id,
-                    f"🔔 **Новая заявка #{request_id}**\n\n"
-                    f"🔧 Профиль: {request_data['service']}\n"
-                    f"📝 Описание: {request_data['description']}\n"
-                    f"📍 Район: {request_data['district']}\n"
-                    f"📅 Срок: {request_data['date']}\n"
-                    f"💰 Бюджет: {request_data['budget']}\n\n"
-                    f"Чтобы откликнуться, используйте команду /respond {request_id} или найдите заявку в разделе «Активные заявки»."
-                )
-                notified += 1
-            except Exception as e:
-                print(f"Не удалось уведомить мастера {master_user_id}: {e}")
-    print(f"Уведомлено {notified} мастеров по заявке #{request_id}")
-    
 def get_master_status(user_id):
-    """Возвращает кортеж (тип, статус) для пользователя-мастера."""
     cursor.execute("SELECT status FROM masters WHERE user_id = ?", (user_id,))
     row = cursor.fetchone()
     if row:
@@ -454,7 +417,7 @@ def delete_group_commands(message):
         except:
             pass
 
-# ================ МЕНЮ ПО РОЛИ (С УЧЁТОМ СТАТУСА МАСТЕРА) ================
+# ================ МЕНЮ ПО РОЛИ ================
 def show_role_menu(message, role):
     user_id = message.from_user.id
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
@@ -490,128 +453,7 @@ def show_role_menu(message, role):
         text = "👋 Добро пожаловать!"
 
     bot.send_message(message.chat.id, text, reply_markup=markup, parse_mode='Markdown')
-
-# ================ СТАРТ / ВЫБОР РОЛИ ================
-@bot.message_handler(commands=['start'])
-def start(message):
-    if message.chat.type != 'private':
-        markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton(
-            "🤖 Перейти в бота",
-            url=BOT_LINK
-        ))
-        bot.reply_to(
-            message,
-            "👋 Добро пожаловать в бот заявок на ремонт!\n\n"
-            "📌 В этом чате я только публикую заявки и отзывы.\n\n"
-            "👇 Вся работа со мной — в личных сообщениях:\n"
-            f"👉 @{BOT_USERNAME}\n\n"
-            "Там вы можете:\n"
-            "✅ Оставить заявку\n"
-            "✅ Найти мастера в каталоге\n"
-            "✅ Стать мастером и добавить анкету\n"
-            "✅ Оставить отзыв или рекомендацию\n"
-            "✅ Проверить статус анкеты",
-            reply_markup=markup
-        )
-        return
-
-    user_id = message.from_user.id
-    cursor.execute('SELECT role FROM users WHERE user_id = ?', (user_id,))
-    row = cursor.fetchone()
-    if not row:
-        markup = types.InlineKeyboardMarkup(row_width=3)
-        markup.add(
-            types.InlineKeyboardButton("🔨 Клиент", callback_data="role_client"),
-            types.InlineKeyboardButton("👷 Мастер", callback_data="role_master"),
-            types.InlineKeyboardButton("👀 Гость", callback_data="role_guest")
-        )
-        bot.send_message(
-            message.chat.id,
-            "👋 **Добро пожаловать!**\n\nКто вы? Выберите роль, чтобы мы могли предложить нужный функционал.\n\n"
-            "• Клиент – ищете мастеров, оставляете заявки и отзывы.\n"
-            "• Мастер – хотите получать заказы.\n"
-            "• Гость – просто посмотреть, без регистрации.",
-            reply_markup=markup
-        )
-    else:
-        role = row[0]
-        show_role_menu(message, role)
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith('role_'))
-def role_callback(call):
-    role = call.data.split('_')[1]
-    user_id = call.from_user.id
-    now = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
-    if role == 'client':
-        cursor.execute('INSERT OR REPLACE INTO users (user_id, role, first_seen, last_active) VALUES (?, ?, ?, ?)',
-                       (user_id, 'client', now, now))
-        conn.commit()
-        bot.edit_message_text("✅ Роль сохранена: **Клиент**.", 
-                              call.message.chat.id, call.message.message_id, parse_mode='Markdown')
-        show_role_menu(call.message, 'client')
-        bot.answer_callback_query(call.id)
-        return
-    if role == 'master':
-        # Проверим, нет ли уже анкеты
-        st, _ = get_master_status(user_id)
-        if st is not None:
-            bot.edit_message_text("❌ Вы уже зарегистрированы как мастер. Используйте меню для управления анкетой.",
-                                  call.message.chat.id, call.message.message_id)
-            bot.answer_callback_query(call.id)
-            return
-        markup = types.InlineKeyboardMarkup(row_width=1)
-        markup.add(
-            types.InlineKeyboardButton("✅ Полная регистрация (с проверкой)", callback_data="master_full"),
-            types.InlineKeyboardButton("🔹 Упрощённое размещение", callback_data="master_simple")
-        )
-        bot.edit_message_text(
-            "👷 **Регистрация мастера**\n\n"
-            "Выберите, как вы хотите участвовать:\n\n"
-            "✅ **Полная регистрация** – заполните анкету с документами. После проверки администратором вы попадёте в базу и закрытый чат мастеров.\n"
-            "🔹 **Упрощённое размещение** – вы сразу попадаете в базу без проверки документов, но не будете получать уведомления о заявках. В любой момент можно пройти полную регистрацию.",
-            call.message.chat.id,
-            call.message.message_id,
-            reply_markup=markup
-        )
-        bot.answer_callback_query(call.id)
-    if role == 'guest':
-        cursor.execute('INSERT OR REPLACE INTO users (user_id, role, first_seen, last_active) VALUES (?, ?, ?, ?)',
-                       (user_id, 'guest', now, now))
-        conn.commit()
-        bot.edit_message_text("✅ Роль сохранена: **Гость**.", 
-                              call.message.chat.id, call.message.message_id, parse_mode='Markdown')
-        show_role_menu(call.message, 'guest')
-        bot.answer_callback_query(call.id)
-
-@bot.callback_query_handler(func=lambda call: call.data in ['master_full', 'master_simple'])
-def master_registration_choice(call):
-    verif_type = 'full' if call.data == 'master_full' else 'simple'
-    user_id = call.from_user.id
-    now = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
-    cursor.execute('INSERT OR REPLACE INTO users (user_id, role, first_seen, last_active) VALUES (?, ?, ?, ?)',
-                   (user_id, 'master', now, now))
-    conn.commit()
-    bot.edit_message_text("✅ Роль сохранена: **Мастер**. Теперь заполните анкету.",
-                          call.message.chat.id, call.message.message_id, parse_mode='Markdown')
-    become_master(call.message, verif_type)
-    bot.answer_callback_query(call.id)
-
-@bot.message_handler(func=lambda message: message.text == '👷 Зарегистрироваться как мастер')
-def guest_register(message):
-    if not only_private(message):
-        return
-    user_id = message.from_user.id
-    st, _ = get_master_status(user_id)
-    if st is not None:
-        bot.send_message(message.chat.id, "❌ Вы уже зарегистрированы как мастер. Используйте меню.")
-        return
-    now = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
-    cursor.execute('UPDATE users SET role = ?, last_active = ? WHERE user_id = ?', ('master', now, user_id))
-    conn.commit()
-    bot.send_message(message.chat.id, "✅ Теперь вы – мастер. Заполните анкету для получения заказов.")
-    become_master(message, 'simple')
-    # ================ АНКЕТА МАСТЕРА (НОВЫЙ ПОРЯДОК) ================
+   # ================ АНКЕТА МАСТЕРА (НОВЫЙ ПОРЯДОК) ================
 if not hasattr(bot, 'master_data'):
     bot.master_data = {}
 
@@ -1002,7 +844,6 @@ def portfolio_send_to_admin_callback(call):
         bot.master_data[user_id] = {}
     bot.master_data[user_id]['send_portfolio_later'] = True
     bot.answer_callback_query(call.id, "✅ Вы сможете отправить фото после заполнения анкеты.")
-    # Переходим к документам (шаг 11)
     show_documents_buttons(call.message.chat.id, user_id)
 
 def process_master_portfolio_text(message, user_id):
@@ -1268,19 +1109,18 @@ def edit_summary_callback(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('edit_field_'))
 def edit_field_callback(call):
-    data = call.data  # например, "edit_field_documents_list_12345"
+    data = call.data
     prefix = "edit_field_"
     if not data.startswith(prefix):
         bot.answer_callback_query(call.id, "❌ Ошибка")
         return
-    rest = data[len(prefix):]  # "documents_list_12345"
-    # Ищем последнее подчёркивание
+    rest = data[len(prefix):]
     last_underscore = rest.rfind('_')
     if last_underscore == -1:
         bot.answer_callback_query(call.id, "❌ Ошибка")
         return
-    field = rest[:last_underscore]  # "documents_list"
-    user_id_str = rest[last_underscore+1:]  # "12345"
+    field = rest[:last_underscore]
+    user_id_str = rest[last_underscore+1:]
     try:
         user_id = int(user_id_str)
     except ValueError:
@@ -1304,17 +1144,14 @@ def process_edit_field_value(message, field, user_id):
     value = safe_text(message)
     if not value:
         bot.send_message(message.chat.id, "❌ Значение не может быть пустым.")
-        # Вернёмся к сводке без изменений
         show_summary(message, user_id)
         return
-    # Обновляем данные
     if field == "profiles":
         bot.master_data[user_id]['profiles'] = value
         bot.master_data[user_id]['services'] = value
         bot.master_data[user_id]['service'] = value.split(',')[0].strip()
     else:
         bot.master_data[user_id][field] = value
-
     bot.send_message(message.chat.id, f"✅ Поле {field} обновлено.")
     show_summary(message, user_id)
 
@@ -1325,7 +1162,8 @@ def cancel_app_callback(call):
         del bot.master_data[user_id]
     bot.edit_message_text("❌ Создание анкеты отменено.", call.message.chat.id, call.message.message_id)
     bot.answer_callback_query(call.id)
-   # ================ СОХРАНЕНИЕ АНКЕТЫ (в БД) ================
+
+# ================ СОХРАНЕНИЕ АНКЕТЫ (в БД) ================
 def save_master_application(message, user_id, user_data):
     if 'verification_type' not in user_data:
         user_data['verification_type'] = 'simple'
@@ -1372,12 +1210,13 @@ def save_master_application(message, user_id, user_data):
     conn.commit()
     application_id = cursor.lastrowid
 
-    # Уведомление админу (используем ссылку с username)
+    # Уведомление админу с кнопкой связи
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("📩 Связаться с мастером", url=f"tg://user?id={user_id}"))
     admin_msg = f"""
 🆕 **НОВАЯ АНКЕТА МАСТЕРА!** (ID: {application_id})
 📱 **Источник:** Бот
 👤 **Telegram:** @{message.from_user.username or "нет"} (ID {user_id})
-🆔 **ID:** {user_id}
 
 👤 Имя: {name}
 🔧 Профили: {services_str}
@@ -1400,11 +1239,10 @@ def save_master_application(message, user_id, user_data):
     """
     try:
         if ADMIN_ID != 0:
-            bot.send_message(ADMIN_ID, admin_msg)
-    except:
-        pass
+            bot.send_message(ADMIN_ID, admin_msg, reply_markup=markup)
+    except Exception as e:
+        print(f"Ошибка отправки админу: {e}")
 
-    # Не удаляем данные здесь, удалим после завершения всех дополнительных действий
     return application_id
 
 # ================ ОБРАБОТЧИК СОХРАНЕНИЯ (СВОДКА) ================
@@ -1423,7 +1261,6 @@ def save_app_callback(call):
         bot.answer_callback_query(call.id, "✅ Анкета отправлена!")
         bot.send_message(call.message.chat.id, "✅ Ваша анкета успешно отправлена на модерацию!")
 
-        # Если мастер выбрал проверку документов, предлагаем отправить документы
         if user_data.get('documents_verified') == 'pending':
             markup = types.InlineKeyboardMarkup()
             markup.add(types.InlineKeyboardButton("📎 Отправить документы", callback_data=f"send_docs_{app_id}"))
@@ -1432,21 +1269,17 @@ def save_app_callback(call):
                 "Вы выбрали вариант с проверкой документов. Теперь вы можете отправить фото/скан документов администратору.",
                 reply_markup=markup
             )
+        elif user_data.get('send_portfolio_later'):
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("📸 Отправить фото для портфолио", callback_data=f"send_photo_{app_id}"))
+            bot.send_message(
+                call.message.chat.id,
+                "Вы хотели отправить фото для портфолио. Сделайте это сейчас.",
+                reply_markup=markup
+            )
         else:
-            # Если документы не выбраны, но мастер хотел отправить фото позже, предложим сразу
-            if user_data.get('send_portfolio_later'):
-                markup = types.InlineKeyboardMarkup()
-                markup.add(types.InlineKeyboardButton("📸 Отправить фото для портфолио", callback_data=f"send_photo_{app_id}"))
-                bot.send_message(
-                    call.message.chat.id,
-                    "Вы хотели отправить фото для портфолио. Сделайте это сейчас.",
-                    reply_markup=markup
-                )
-            else:
-                # Возвращаем в меню
-                show_role_menu(call.message, 'master')
+            show_role_menu(call.message, 'master')
 
-        # Очищаем временные данные
         if user_id in bot.master_data:
             del bot.master_data[user_id]
 
@@ -1480,9 +1313,8 @@ def process_docs_for_verification(message, app_id, user_id):
             bot.send_message(message.chat.id, "✅ Документ отправлен администратору.")
         except Exception as e:
             bot.send_message(message.chat.id, "⚠️ Не удалось отправить документ. Попробуйте позже.")
-            # Здесь можно записать в БД для повторной отправки, но пока пропустим
+            # Здесь можно добавить логирование или повторную отправку
 
-        # Предлагаем дальнейшие действия
         markup = types.InlineKeyboardMarkup(row_width=1)
         markup.add(
             types.InlineKeyboardButton("📎 Отправить ещё документ", callback_data=f"send_docs_{app_id}"),
@@ -1497,15 +1329,7 @@ def process_docs_for_verification(message, app_id, user_id):
     else:
         bot.send_message(message.chat.id, "❌ Пожалуйста, отправьте фото.")
         bot.register_next_step_handler(message, process_docs_for_verification, app_id, user_id)
-        
-@bot.callback_query_handler(func=lambda call: call.data == 'finish_docs')
-def finish_docs_callback(call):
-    bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
-    bot.send_message(call.message.chat.id, "✅ Вы завершили отправку документов. Спасибо!")
-    # Возвращаем в главное меню
-    show_role_menu(call.message, 'master')
-    bot.answer_callback_query(call.id)
-    
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith('send_photo_'))
 def send_photo_callback(call):
     app_id = int(call.data.split('_')[2])
@@ -1520,28 +1344,70 @@ def send_photo_callback(call):
 def process_photo_for_portfolio(message, app_id, user_id):
     if message.photo:
         file_id = message.photo[-1].file_id
-        bot.send_photo(
-            ADMIN_ID,
-            file_id,
-            caption=f"📸 Портфолио от мастера (заявка #{app_id}, user {user_id})"
+        try:
+            bot.send_photo(
+                ADMIN_ID,
+                file_id,
+                caption=f"📸 Портфолио от мастера (заявка #{app_id}, user {user_id})"
+            )
+            bot.send_message(message.chat.id, "✅ Фото отправлено администратору. После создания ссылки ваш статус будет обновлён.")
+        except Exception as e:
+            bot.send_message(message.chat.id, "⚠️ Не удалось отправить фото. Попробуйте позже.")
+
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        markup.add(
+            types.InlineKeyboardButton("📸 Отправить ещё фото", callback_data=f"send_photo_{app_id}"),
+            types.InlineKeyboardButton("📎 Отправить документ", callback_data=f"send_docs_{app_id}"),
+            types.InlineKeyboardButton("✅ Завершить", callback_data="finish_docs")
         )
-        bot.send_message(message.chat.id, "✅ Фото отправлено администратору. После создания ссылки ваш статус будет обновлён.")
-        # Возвращаем в главное меню мастера
-        show_role_menu(message, 'master')
+        bot.send_message(
+            message.chat.id,
+            "Что хотите сделать дальше?",
+            reply_markup=markup
+        )
     else:
         bot.send_message(message.chat.id, "❌ Пожалуйста, отправьте фото.")
         bot.register_next_step_handler(message, process_photo_for_portfolio, app_id, user_id)
 
-# ================ ОСТАЛЬНЫЕ КНОПКИ МАСТЕРА ================
-# (кнопки "Моя анкета", "Статус анкеты", "Отозвать анкету", "Написать админу" и т.д.)
-# Они уже были определены ранее и остаются без изменений, но нужно проверить, что в них используются новые юзернеймы.
-# В коде из первой части они уже используют ADMIN_USERNAME и BOT_USERNAME.
-# При необходимости обновим.
+@bot.callback_query_handler(func=lambda call: call.data == 'finish_docs')
+def finish_docs_callback(call):
+    bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+    bot.send_message(call.message.chat.id, "✅ Вы завершили отправку. Спасибо!")
+    show_role_menu(call.message, 'master')
+    bot.answer_callback_query(call.id)
+# ================ ФУНКЦИЯ УВЕДОМЛЕНИЯ МАСТЕРОВ ================
+def notify_masters_about_new_request(request_id, request_data):
+    """Уведомляет мастеров, чьи профили и районы соответствуют заявке."""
+    service = request_data['service'].lower()
+    district = request_data['district'].lower()
+
+    cursor.execute('''SELECT user_id, name, service, districts FROM masters WHERE status = 'активен' ''')
+    masters = cursor.fetchall()
+    notified = 0
+    for master in masters:
+        master_user_id, master_name, master_service, master_districts = master
+        service_match = any(prof.strip().lower() in master_service.lower() for prof in service.split())
+        district_match = any(d.strip().lower() in district for d in master_districts.split(','))
+        if service_match and district_match:
+            try:
+                bot.send_message(
+                    master_user_id,
+                    f"🔔 **Новая заявка #{request_id}**\n\n"
+                    f"🔧 Профиль: {request_data['service']}\n"
+                    f"📝 Описание: {request_data['description']}\n"
+                    f"📍 Район: {request_data['district']}\n"
+                    f"📅 Срок: {request_data['date']}\n"
+                    f"💰 Бюджет: {request_data['budget']}\n\n"
+                    f"Чтобы откликнуться, используйте команду /respond {request_id} или найдите заявку в разделе «Активные заявки»."
+                )
+                notified += 1
+            except Exception as e:
+                print(f"Не удалось уведомить мастера {master_user_id}: {e}")
+    print(f"Уведомлено {notified} мастеров по заявке #{request_id}")
 
 # ================ КЛИЕНТСКАЯ ЧАСТЬ (ЗАЯВКИ) ================
-# (будет вставлена из предыдущей версии, с одиночным выбором профиля и района)
-# Для краткости я приведу только ключевые функции, так как они были в третьей части ранее.
-# Но здесь я интегрирую их с новыми списками PROFILES и DISTRICTS.
+if not hasattr(bot, 'request_data'):
+    bot.request_data = {}
 
 @bot.message_handler(func=lambda message: message.text == '🔨 Оставить заявку')
 def create_request_start(message):
@@ -1568,10 +1434,7 @@ def request_type_callback(call):
     cursor.execute('UPDATE users SET last_active = ? WHERE user_id = ?', (now, user_id))
     conn.commit()
 
-    if not hasattr(bot, 'request_data'):
-        bot.request_data = {}
     bot.request_data[user_id] = {'type': req_type}
-
     ask_client_service(call.message.chat.id, user_id)
     bot.answer_callback_query(call.id)
 
@@ -1622,7 +1485,7 @@ def client_district_callback(call):
     bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
     bot.send_message(
         call.message.chat.id,
-        "📝 **Шаг 3 из 5**\n\nОпишите задачу подробнее."
+        "📝 **Шаг 3 из 5**\n\nОпишите задачу подробнее:"
     )
     bot.register_next_step_handler(call.message, process_request_description)
     bot.answer_callback_query(call.id)
@@ -1635,8 +1498,6 @@ def process_request_description(message):
         bot.send_message(message.chat.id, "❌ Пожалуйста, опишите задачу.")
         return
     user_id = message.from_user.id
-    if user_id not in bot.request_data:
-        bot.request_data[user_id] = {}
     bot.request_data[user_id]['description'] = desc
     msg = bot.send_message(
         message.chat.id,
@@ -1794,8 +1655,888 @@ def cancel_request(call):
     bot.send_message(call.message.chat.id, "❌ Создание заявки отменено.")
     bot.answer_callback_query(call.id)
 
-# Остальные функции (поиск мастера, отзывы, рекомендации, админ-панель) остаются из предыдущих версий с обновлёнными ссылками.
-# Для краткости здесь не привожу, но они должны быть вставлены из старых частей с заменой @remont_vl25 на @masterVL25_admin и @remont_vl25_chat_bot на @masterVL25_bot.
+# ================ КНОПКА "МОИ ЗАЯВКИ" (КЛИЕНТ) ================
+@bot.message_handler(func=lambda message: message.text == '📋 Мои заявки')
+def my_requests_handler(message):
+    if not only_private(message):
+        return
+    my_requests(message)
+
+def my_requests(message):
+    user_id = message.from_user.id
+    cursor.execute('''SELECT id, service, description, district, date, budget, status, created_at, chat_message_id
+                      FROM requests WHERE user_id = ? ORDER BY created_at DESC''', (user_id,))
+    requests = cursor.fetchall()
+    if not requests:
+        bot.send_message(message.chat.id, "У вас пока нет заявок.")
+        return
+    for req in requests:
+        req_id, service, desc, district, date, budget, status, created, chat_msg_id = req
+        text = f"""
+📋 **Заявка #{req_id}**
+🔧 Профиль: {service}
+📝 Описание: {desc}
+📍 Район: {district}
+📅 Срок: {date}
+💰 Бюджет: {budget}
+📌 Статус: {status}
+🕒 Создана: {created}
+        """
+        if chat_msg_id is None and status == 'активна':
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("✏️ Редактировать", callback_data=f"edit_request_{req_id}"))
+            bot.send_message(message.chat.id, text, reply_markup=markup)
+        else:
+            bot.send_message(message.chat.id, text)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('edit_request_'))
+def edit_request_callback(call):
+    req_id = int(call.data.split('_')[2])
+    user_id = call.from_user.id
+    cursor.execute("DELETE FROM requests WHERE id = ? AND user_id = ?", (req_id, user_id))
+    conn.commit()
+    bot.answer_callback_query(call.id, "✅ Старая заявка удалена, создайте новую.")
+    create_request_start(call.message)
+
+# ================ КНОПКА "АКТИВНЫЕ ЗАЯВКИ" (ДЛЯ МАСТЕРА) ================
+@bot.message_handler(func=lambda message: message.text == '📋 Активные заявки')
+def active_requests_handler(message):
+    if not only_private(message):
+        return
+    active_requests(message)
+
+def active_requests(message):
+    cursor.execute('''SELECT id, service, description, district, date, budget, created_at 
+                      FROM requests WHERE status = 'активна' AND is_public = 1 ORDER BY created_at DESC LIMIT 10''')
+    requests = cursor.fetchall()
+    if not requests:
+        bot.send_message(message.chat.id, "Нет активных публичных заявок.")
+        return
+    for req in requests:
+        req_id, service, desc, district, date, budget, created = req
+        text = f"""
+📋 **Заявка #{req_id}**
+🔧 Профиль: {service}
+📝 Описание: {desc}
+📍 Район: {district}
+📅 Срок: {date}
+💰 Бюджет: {budget}
+        """
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("📞 Откликнуться", callback_data=f"respond_{req_id}"))
+        bot.send_message(message.chat.id, text, reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('respond_'))
+def respond_to_request(call):
+    req_id = int(call.data.split('_')[1])
+    user_id = call.from_user.id
+    cursor.execute('SELECT id FROM masters WHERE user_id = ? AND status = "активен"', (user_id,))
+    master = cursor.fetchone()
+    if not master:
+        bot.answer_callback_query(call.id, "❌ Вы не активный мастер. Заполните анкету и дождитесь одобрения.")
+        return
+    master_id = master[0]
+    cursor.execute('SELECT id FROM responses WHERE request_id = ? AND master_id = ?', (req_id, master_id))
+    if cursor.fetchone():
+        bot.answer_callback_query(call.id, "❌ Вы уже откликнулись на эту заявку.")
+        return
+    bot.send_message(
+        call.message.chat.id,
+        "📝 Напишите ваше предложение (цену, комментарий):"
+    )
+    bot.register_next_step_handler(call.message, process_response, req_id, master_id)
+    bot.answer_callback_query(call.id)
+
+def process_response(message, req_id, master_id):
+    text = safe_text(message)
+    if not text:
+        bot.send_message(message.chat.id, "❌ Введите текст отклика.")
+        return
+    now = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+    cursor.execute('''INSERT INTO responses (request_id, master_id, price, comment, status, created_at)
+                      VALUES (?, ?, ?, ?, ?, ?)''',
+                    (req_id, master_id, '', text, 'pending', now))
+    conn.commit()
+    bot.send_message(message.chat.id, "✅ Ваш отклик отправлен клиенту и администратору.")
+    cursor.execute('SELECT user_id FROM requests WHERE id = ?', (req_id,))
+    client_id = cursor.fetchone()[0]
+    try:
+        bot.send_message(
+            client_id,
+            f"🔔 На вашу заявку #{req_id} поступил отклик от мастера. Проверьте в боте."
+        )
+    except:
+        pass
+
+# ================ ОБРАБОТКА ОТКЛИКОВ ИЗ КАНАЛА ================
+@bot.callback_query_handler(func=lambda call: call.data.startswith('channel_respond_'))
+def channel_respond_callback(call):
+    request_id = int(call.data.split('_')[2])
+    user_id = call.from_user.id
+    cursor.execute('SELECT id, service FROM masters WHERE user_id = ? AND status = "активен"', (user_id,))
+    master = cursor.fetchone()
+    if not master:
+        bot.answer_callback_query(call.id, "❌ Только активные мастера могут откликаться.", show_alert=True)
+        return
+    master_id, master_service = master
+    cursor.execute('SELECT service FROM requests WHERE id = ?', (request_id,))
+    row = cursor.fetchone()
+    if not row:
+        bot.answer_callback_query(call.id, "❌ Заявка не найдена.")
+        return
+    request_service = row[0]
+    if not any(prof.strip().lower() in request_service.lower() for prof in master_service.split(',')):
+        bot.answer_callback_query(call.id, "❌ Ваш профиль не подходит для этой заявки.", show_alert=True)
+        return
+    bot.answer_callback_query(call.id, "✅ Перейдите в бота для отклика.")
+    bot.send_message(
+        user_id,
+        f"Вы хотите откликнуться на заявку #{request_id}. Напишите ваше предложение (цена и комментарий):"
+    )
+    bot.register_next_step_handler_by_chat_id(user_id, process_response_from_channel, request_id, master_id)
+
+def process_response_from_channel(message, request_id, master_id):
+    text = safe_text(message)
+    if not text:
+        bot.send_message(message.chat.id, "❌ Введите текст отклика.")
+        return
+    now = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+    cursor.execute('''INSERT INTO responses (request_id, master_id, price, comment, status, created_at)
+                      VALUES (?, ?, ?, ?, ?, ?)''',
+                    (request_id, master_id, '', text, 'pending', now))
+    conn.commit()
+    bot.send_message(message.chat.id, "✅ Ваш отклик отправлен клиенту и администратору.")
+    cursor.execute('SELECT user_id FROM requests WHERE id = ?', (request_id,))
+    client_id = cursor.fetchone()[0]
+    try:
+        bot.send_message(
+            client_id,
+            f"🔔 На вашу заявку #{request_id} поступил отклик от мастера. Проверьте в боте."
+        )
+    except:
+        pass
+
+# ================ ПОИСК МАСТЕРА (КАТАЛОГ) ================
+@bot.message_handler(func=lambda message: message.text == '🔍 Найти мастера')
+def find_master_start(message):
+    if not only_private(message):
+        return
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.row('По профилю', 'По району', 'По рейтингу')
+    markup.row('◀️ Назад в меню')
+    bot.send_message(
+        message.chat.id,
+        "🔍 **Поиск мастера**\n\nВыберите критерий поиска:",
+        reply_markup=markup
+    )
+    bot.register_next_step_handler(message, find_master_menu)
+
+def find_master_menu(message):
+    text = message.text
+    if text == '◀️ Назад в меню':
+        cursor.execute('SELECT role FROM users WHERE user_id = ?', (message.from_user.id,))
+        row = cursor.fetchone()
+        role = row[0] if row else 'client'
+        show_role_menu(message, role)
+        return
+    if text == 'По профилю':
+        bot.send_message(
+            message.chat.id,
+            "🔧 **Введите профиль**\nНапример: *сантехник, электрик, отделочник*"
+        )
+        bot.register_next_step_handler(message, search_by_service)
+    elif text == 'По району':
+        bot.send_message(
+            message.chat.id,
+            "📍 **Введите район или ЖК**\nНапример: *Патрокл, Снеговая Падь, Центр*"
+        )
+        bot.register_next_step_handler(message, search_by_district)
+    elif text == 'По рейтингу':
+        search_by_rating(message)
+    else:
+        bot.send_message(message.chat.id, "❌ Неверный выбор. Попробуйте снова.")
+        find_master_start(message)
+
+def search_by_service(message):
+    service = safe_text(message).lower()
+    if not service:
+        bot.send_message(message.chat.id, "❌ Введите профиль.")
+        return
+    cursor.execute('''SELECT id, name, service, rating, reviews_count, districts
+                      FROM masters WHERE status = 'активен' AND LOWER(service) LIKE ?''',
+                   (f'%{service}%',))
+    masters = cursor.fetchall()
+    if not masters:
+        bot.send_message(message.chat.id, "😕 Мастеров с таким профилем пока нет.")
+        return
+    send_masters_list(message.chat.id, masters)
+
+def search_by_district(message):
+    district = safe_text(message).lower()
+    if not district:
+        bot.send_message(message.chat.id, "❌ Введите район.")
+        return
+    cursor.execute('''SELECT id, name, service, rating, reviews_count, districts
+                      FROM masters WHERE status = 'активен' AND LOWER(districts) LIKE ?''',
+                   (f'%{district}%',))
+    masters = cursor.fetchall()
+    if not masters:
+        bot.send_message(message.chat.id, "😕 Мастеров в этом районе пока нет.")
+        return
+    send_masters_list(message.chat.id, masters)
+
+def search_by_rating(message):
+    cursor.execute('''SELECT id, name, service, rating, reviews_count, districts
+                      FROM masters WHERE status = 'активен' ORDER BY rating DESC, reviews_count DESC LIMIT 10''')
+    masters = cursor.fetchall()
+    if not masters:
+        bot.send_message(message.chat.id, "😕 Активных мастеров пока нет.")
+        return
+    send_masters_list(message.chat.id, masters)
+
+def send_masters_list(chat_id, masters):
+    for master in masters:
+        master_id, name, service, rating, reviews_count, districts = master
+        rating_display = f"{rating:.1f}" if rating else "Нет"
+        text = f"""
+👤 **{name}**
+🔧 Профили: {service}
+⭐ Рейтинг: {rating_display} ({reviews_count} отзывов)
+📍 Районы: {districts}
+        """
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("👤 Подробнее", callback_data=f"master_{master_id}"))
+        bot.send_message(chat_id, text, reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('master_'))
+def master_detail(call):
+    master_id = int(call.data.split('_')[1])
+    cursor.execute('''SELECT name, service, phone, districts, price_min, experience, bio, portfolio, rating, reviews_count
+                      FROM masters WHERE id = ?''', (master_id,))
+    master = cursor.fetchone()
+    if not master:
+        bot.answer_callback_query(call.id, "❌ Мастер не найден")
+        return
+    name, service, phone, districts, price_min, experience, bio, portfolio, rating, reviews_count = master
+    rating_display = f"{rating:.1f}" if rating else "Нет"
+    text = f"""
+👤 **{name}**
+🔧 Профили: {service}
+⭐ Рейтинг: {rating_display} ({reviews_count} отзывов)
+📍 Районы: {districts}
+💰 Мин. цена: {price_min}
+⏱ Опыт: {experience}
+💬 О себе: {bio}
+📸 Портфолио: {portfolio}
+    """
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("📞 Связаться", callback_data=f"contact_{master_id}"))
+    markup.add(types.InlineKeyboardButton("⭐ Отзывы", callback_data=f"reviews_{master_id}"))
+    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup)
+    bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('contact_'))
+def contact_master(call):
+    master_id = int(call.data.split('_')[1])
+    cursor.execute('SELECT phone FROM masters WHERE id = ?', (master_id,))
+    row = cursor.fetchone()
+    if not row:
+        bot.answer_callback_query(call.id, "❌ Контакт не найден")
+        return
+    phone = row[0]
+    bot.answer_callback_query(call.id, f"Телефон: {phone}", show_alert=True)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('reviews_'))
+def show_master_reviews(call):
+    master_id = int(call.data.split('_')[1])
+    cursor.execute('''SELECT user_name, review_text, rating, created_at
+                      FROM reviews WHERE master_id = ? AND status = 'approved'
+                      ORDER BY created_at DESC LIMIT 5''', (master_id,))
+    reviews = cursor.fetchall()
+    if not reviews:
+        bot.send_message(call.message.chat.id, "У этого мастера пока нет отзывов.")
+        return
+    text = f"⭐ **Отзывы о мастере**\n\n"
+    for r in reviews:
+        user_name, rev_text, rating, created = r
+        text += f"👤 {user_name} – {rating}/5\n{rev_text}\n_{created}_\n\n"
+    bot.send_message(call.message.chat.id, text)
+
+# ================ ОСТАВИТЬ ОТЗЫВ ================
+@bot.message_handler(func=lambda message: message.text == '⭐ Оставить отзыв')
+def review_start(message):
+    if not only_private(message):
+        return
+    bot.send_message(
+        message.chat.id,
+        "⭐ **Оставьте отзыв о мастере**\n\nВведите имя или ID мастера, чтобы найти его в базе."
+    )
+    bot.register_next_step_handler(message, find_master_for_review)
+
+def find_master_for_review(message):
+    query = safe_text(message)
+    if not query:
+        bot.send_message(message.chat.id, "❌ Введите имя или ID.")
+        return
+    cursor.execute('''SELECT id, name, service FROM masters
+                      WHERE status = 'активен' AND (name LIKE ? OR id = ?)''',
+                   (f'%{query}%', query if query.isdigit() else -1))
+    masters = cursor.fetchall()
+    if not masters:
+        bot.send_message(message.chat.id, "😕 Мастер не найден. Попробуйте другое имя.")
+        return
+    if len(masters) == 1:
+        master_id, name, service = masters[0]
+        bot.send_message(
+            message.chat.id,
+            f"Найден мастер: {name} ({service})\nВведите текст отзыва:"
+        )
+        bot.register_next_step_handler(message, process_review_text, master_id, name)
+    else:
+        text = "Найдено несколько мастеров:\n"
+        for m in masters:
+            text += f"ID {m[0]}: {m[1]} ({m[2]})\n"
+        text += "\nВведите ID нужного мастера:"
+        bot.send_message(message.chat.id, text)
+        bot.register_next_step_handler(message, choose_master_for_review, masters)
+
+def choose_master_for_review(message, masters):
+    try:
+        master_id = int(message.text)
+        selected = [m for m in masters if m[0] == master_id]
+        if not selected:
+            raise ValueError
+        name, service = selected[0][1], selected[0][2]
+        bot.send_message(message.chat.id, f"Вы выбрали {name} ({service}). Введите текст отзыва:")
+        bot.register_next_step_handler(message, process_review_text, master_id, name)
+    except:
+        bot.send_message(message.chat.id, "❌ Неверный ID. Попробуйте снова.")
+        find_master_for_review(message)
+
+def process_review_text(message, master_id, master_name):
+    text = safe_text(message)
+    if not text:
+        bot.send_message(message.chat.id, "❌ Текст не может быть пустым.")
+        return
+    markup = types.InlineKeyboardMarkup(row_width=5)
+    buttons = [types.InlineKeyboardButton(str(i), callback_data=f"review_rate_{i}_{master_id}") for i in range(1, 6)]
+    markup.add(*buttons)
+    bot.send_message(
+        message.chat.id,
+        f"⭐ Оцените мастера {master_name} от 1 до 5:",
+        reply_markup=markup
+    )
+    bot.master_review_text = {message.from_user.id: (master_id, master_name, text)}
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('review_rate_'))
+def review_rate_callback(call):
+    parts = call.data.split('_')
+    rating = int(parts[2])
+    master_id = int(parts[3])
+    user_id = call.from_user.id
+    if user_id not in bot.master_review_text:
+        bot.answer_callback_query(call.id, "❌ Ошибка, начните заново.")
+        return
+    master_id, master_name, review_text = bot.master_review_text[user_id]
+    now = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+    cursor.execute('''INSERT INTO reviews
+                    (master_id, master_name, user_id, user_name, review_text, rating, status, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                    (master_id, master_name, user_id,
+                     call.from_user.username or "Аноним",
+                     review_text, rating, 'pending', now))
+    conn.commit()
+    bot.edit_message_text(
+        "✅ Спасибо! Отзыв отправлен на модерацию.",
+        call.message.chat.id,
+        call.message.message_id
+    )
+    bot.answer_callback_query(call.id, "Отзыв сохранён")
+    del bot.master_review_text[user_id]
+    admin_text = f"""
+🆕 **НОВЫЙ ОТЗЫВ** (ожидает модерации)
+👤 Мастер: {master_name} (ID {master_id})
+👤 От: @{call.from_user.username or "аноним"}
+⭐ Оценка: {rating}
+💬 Текст: {review_text}
+    """
+    try:
+        bot.send_message(ADMIN_ID, admin_text)
+    except:
+        pass
+
+# ================ РЕКОМЕНДОВАТЬ МАСТЕРА ================
+@bot.message_handler(func=lambda message: message.text == '👍 Рекомендовать мастера')
+def recommend_start(message):
+    if not only_private(message):
+        return
+    bot.send_message(
+        message.chat.id,
+        "👍 **Рекомендация мастера**\n\n"
+        "Знаете хорошего специалиста, которого пока нет в базе? Расскажите о нём, и мы добавим его.\n\n"
+        "Введите имя мастера:"
+    )
+    bot.register_next_step_handler(message, process_recommend_name)
+
+def process_recommend_name(message):
+    name = safe_text(message)
+    if not name:
+        bot.send_message(message.chat.id, "❌ Введите имя.")
+        return
+    user_id = message.from_user.id
+    if not hasattr(bot, 'recommend_data'):
+        bot.recommend_data = {}
+    bot.recommend_data[user_id] = {'master_name': name}
+    bot.send_message(
+        message.chat.id,
+        "🔧 Какую специализацию вы можете порекомендовать?\nПример: *сантехник, электрик*"
+    )
+    bot.register_next_step_handler(message, process_recommend_service)
+
+def process_recommend_service(message):
+    service = safe_text(message)
+    if not service:
+        bot.send_message(message.chat.id, "❌ Введите специализацию.")
+        return
+    user_id = message.from_user.id
+    bot.recommend_data[user_id]['service'] = service
+    bot.send_message(
+        message.chat.id,
+        "📞 Контакт мастера (телефон, ник в Telegram и т.п.):"
+    )
+    bot.register_next_step_handler(message, process_recommend_contact)
+
+def process_recommend_contact(message):
+    contact = safe_text(message)
+    if not contact:
+        bot.send_message(message.chat.id, "❌ Введите контакт.")
+        return
+    user_id = message.from_user.id
+    bot.recommend_data[user_id]['contact'] = contact
+    bot.send_message(
+        message.chat.id,
+        "📝 Краткое описание: почему вы рекомендуете этого мастера?"
+    )
+    bot.register_next_step_handler(message, process_recommend_desc)
+
+def process_recommend_desc(message):
+    desc = safe_text(message)
+    if not desc:
+        bot.send_message(message.chat.id, "❌ Введите описание.")
+        return
+    user_id = message.from_user.id
+    bot.recommend_data[user_id]['description'] = desc
+    now = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+    cursor.execute('''INSERT INTO recommendations
+                    (user_id, username, master_name, service, contact, description, status, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                    (user_id,
+                     message.from_user.username or "no_username",
+                     bot.recommend_data[user_id]['master_name'],
+                     bot.recommend_data[user_id]['service'],
+                     bot.recommend_data[user_id]['contact'],
+                     bot.recommend_data[user_id]['description'],
+                     'на модерации',
+                     now))
+    conn.commit()
+    rec_id = cursor.lastrowid
+    bot.send_message(
+        message.chat.id,
+        "✅ Спасибо за рекомендацию! Администратор проверит её и свяжется с мастером."
+    )
+    del bot.recommend_data[user_id]
+    admin_text = f"""
+🆕 **НОВАЯ РЕКОМЕНДАЦИЯ МАСТЕРА** (ID: {rec_id})
+👤 Рекомендатель: @{message.from_user.username or "нет"}
+👤 Мастер: {bot.recommend_data[user_id]['master_name']}
+🔧 Специализация: {bot.recommend_data[user_id]['service']}
+📞 Контакт: {bot.recommend_data[user_id]['contact']}
+📝 Описание: {bot.recommend_data[user_id]['description']}
+    """
+    try:
+        bot.send_message(ADMIN_ID, admin_text)
+    except:
+        pass
+
+# ================ АДМИНИСТРАТИВНЫЕ КОМАНДЫ ================
+@bot.message_handler(commands=['approve'])
+def approve_master(message):
+    if message.from_user.id != ADMIN_ID:
+        bot.reply_to(message, "❌ Нет прав.")
+        return
+    try:
+        app_id = int(message.text.split()[1])
+        cursor.execute('''SELECT user_id, name, service, phone, districts, price_min,
+                          experience, bio, portfolio, documents, entity_type, verification_type,
+                          documents_list, payment_methods, preferred_contact, age_group, source
+                          FROM master_applications WHERE id = ?''', (app_id,))
+        app = cursor.fetchone()
+        if not app:
+            bot.reply_to(message, f"❌ Анкета с ID {app_id} не найдена.")
+            return
+        (user_id, name, service, phone, districts, price_min,
+         experience, bio, portfolio, documents, entity_type, verification_type,
+         documents_list, payment_methods, preferred_contact, age_group, source) = app
+
+        now = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+        cursor.execute('''INSERT INTO masters
+                        (user_id, name, service, phone, districts, price_min, price_max,
+                         experience, bio, portfolio, documents, entity_type, verification_type,
+                         documents_list, payment_methods, preferred_contact, age_group,
+                         source, status, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                        (user_id, name, service, phone, districts, price_min, '',
+                         experience, bio, portfolio, documents, entity_type, verification_type,
+                         documents_list, payment_methods, preferred_contact, age_group,
+                         source, 'активен', now))
+        conn.commit()
+        master_id = cursor.lastrowid
+
+        cursor.execute("DELETE FROM master_applications WHERE id = ?", (app_id,))
+        conn.commit()
+
+        try:
+            bot.send_message(
+                user_id,
+                f"✅ Поздравляем! Ваша анкета одобрена!\n\nВы добавлены в базу мастеров. Теперь вы будете получать уведомления о новых заявках по вашим профилям и районам.\n\nПриглашаем в закрытый чат мастеров: {MASTER_CHAT_INVITE_LINK}"
+            )
+        except:
+            pass
+
+        publish_master_card(master_id, name, service, districts, price_min, experience, bio, portfolio)
+        bot.reply_to(message, f"✅ Мастер одобрен (ID {master_id}).")
+    except Exception as e:
+        bot.reply_to(message, f"❌ Ошибка: {e}")
+
+@bot.message_handler(commands=['reject'])
+def reject_master(message):
+    if message.from_user.id != ADMIN_ID:
+        bot.reply_to(message, "❌ Нет прав.")
+        return
+    try:
+        parts = message.text.split(maxsplit=2)
+        app_id = int(parts[1])
+        reason = parts[2] if len(parts) > 2 else "Причина не указана"
+        cursor.execute('SELECT user_id FROM master_applications WHERE id = ?', (app_id,))
+        row = cursor.fetchone()
+        if not row:
+            bot.reply_to(message, f"❌ Анкета с ID {app_id} не найдена.")
+            return
+        user_id = row[0]
+        cursor.execute("DELETE FROM master_applications WHERE id = ?", (app_id,))
+        conn.commit()
+        try:
+            bot.send_message(
+                user_id,
+                f"❌ Ваша анкета отклонена.\nПричина: {reason}\n\nВы можете попробовать снова, исправив ошибки."
+            )
+        except:
+            pass
+        bot.reply_to(message, f"✅ Анкета {app_id} отклонена.")
+    except Exception as e:
+        bot.reply_to(message, f"❌ Ошибка: {e}")
+
+def publish_master_card(master_id, name, service, districts, price_min, experience, bio, portfolio):
+    # Убедимся, что в portfolio не попал телефон
+    if portfolio and portfolio.strip() and portfolio != 'Не указано':
+        portfolio_text = portfolio
+    else:
+        portfolio_text = "Не указано"
+    text = f"""
+👤 **НОВЫЙ МАСТЕР В БАЗЕ!**
+
+👤 **Имя:** {name}
+🔧 **Профили:** {service}
+📍 **Районы:** {districts}
+💰 **Мин. цена:** {price_min}
+⏱ **Опыт:** {experience}
+💬 **О себе:** {bio}
+📸 **Портфолио:** {portfolio_text}
+
+⭐ Подробнее и отзывы – в боте: @{BOT_USERNAME}
+    """
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("📝 Оставить заявку этому мастеру", callback_data=f"channel_master_{master_id}"))
+    try:
+        sent = bot.send_message(CHANNEL_ID, text, reply_markup=markup)
+        cursor.execute("UPDATE masters SET channel_message_id = ? WHERE id = ?", (sent.message_id, master_id))
+        conn.commit()
+    except Exception as e:
+        print(f"Ошибка публикации карточки мастера: {e}")
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('channel_master_'))
+def channel_master_callback(call):
+    master_id = int(call.data.split('_')[2])
+    user_id = call.from_user.id
+    bot.answer_callback_query(call.id, "✅ Перейдите в бота, чтобы оставить заявку.")
+    bot.send_message(
+        user_id,
+        f"Вы хотите оставить заявку мастеру. Перейдите в бота и нажмите «🔨 Оставить заявку», укажите его профиль."
+    )
+
+# ================ АДМИНИСТРАТИВНЫЕ КНОПКИ ================
+@bot.message_handler(commands=['admin'])
+def admin_panel(message):
+    if message.from_user.id != ADMIN_ID:
+        bot.reply_to(message, "❌ Нет прав.")
+        return
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("📋 Заявки мастеров", callback_data="admin_apps"),
+        types.InlineKeyboardButton("📝 Отзывы на модерации", callback_data="admin_reviews"),
+        types.InlineKeyboardButton("👍 Рекомендации", callback_data="admin_recs"),
+        types.InlineKeyboardButton("📢 Клиентские рекомендации", callback_data="admin_client_recs"),
+        types.InlineKeyboardButton("📊 Статистика", callback_data="admin_stats"),
+        types.InlineKeyboardButton("🚀 Опубликовать отложенные", callback_data="admin_publish_delayed")
+    )
+    bot.send_message(message.chat.id, "🔧 **Панель администратора**", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('admin_'))
+def admin_callback(call):
+    if call.from_user.id != ADMIN_ID:
+        bot.answer_callback_query(call.id, "❌ Нет прав")
+        return
+    cmd = call.data.split('_')[1]
+    if cmd == 'apps':
+        cursor.execute('''SELECT id, name, service, phone, created_at FROM master_applications WHERE status = 'На проверке' ORDER BY created_at DESC''')
+        apps = cursor.fetchall()
+        if not apps:
+            bot.send_message(call.message.chat.id, "Нет заявок на проверку.")
+            return
+        for app in apps:
+            app_id, name, service, phone, created = app
+            text = f"ID: {app_id} | {name} | {service} | {phone} | {created}"
+            markup = types.InlineKeyboardMarkup()
+            markup.add(
+                types.InlineKeyboardButton("✅ Одобрить", callback_data=f"app_approve_{app_id}"),
+                types.InlineKeyboardButton("❌ Отклонить", callback_data=f"app_reject_{app_id}")
+            )
+            bot.send_message(call.message.chat.id, text, reply_markup=markup)
+        bot.answer_callback_query(call.id)
+    elif cmd == 'reviews':
+        cursor.execute('''SELECT id, master_name, user_name, rating, review_text, created_at
+                          FROM reviews WHERE status = 'pending' ORDER BY created_at''')
+        revs = cursor.fetchall()
+        if not revs:
+            bot.send_message(call.message.chat.id, "Нет отзывов на модерации.")
+            return
+        for rev in revs:
+            rev_id, master, user, rating, text, created = rev
+            msg = f"ID {rev_id} | {master} | от {user} | {rating}/5\n{text}\n_{created}_"
+            markup = types.InlineKeyboardMarkup()
+            markup.add(
+                types.InlineKeyboardButton("✅ Одобрить", callback_data=f"rev_approve_{rev_id}"),
+                types.InlineKeyboardButton("❌ Отклонить", callback_data=f"rev_reject_{rev_id}")
+            )
+            bot.send_message(call.message.chat.id, msg, reply_markup=markup)
+        bot.answer_callback_query(call.id)
+    elif cmd == 'recs':
+        cursor.execute('''SELECT id, master_name, service, contact, user_id FROM recommendations WHERE status = 'на модерации' ORDER BY created_at''')
+        recs = cursor.fetchall()
+        if not recs:
+            bot.send_message(call.message.chat.id, "Нет рекомендаций на модерации.")
+            return
+        for rec in recs:
+            rec_id, name, service, contact, recommender_id = rec
+            msg = f"ID {rec_id} | {name} | {service} | Контакт: {contact}"
+            markup = types.InlineKeyboardMarkup()
+            markup.add(
+                types.InlineKeyboardButton("✅ Принять", callback_data=f"rec_approve_{rec_id}"),
+                types.InlineKeyboardButton("❌ Отклонить", callback_data=f"rec_reject_{rec_id}")
+            )
+            bot.send_message(call.message.chat.id, msg, reply_markup=markup)
+        bot.answer_callback_query(call.id)
+    elif cmd == 'client_recs':
+        cursor.execute('''SELECT id, user_id, username, hashtag, contact, description
+                          FROM client_recommendations WHERE status = 'new' ORDER BY created_at''')
+        recs = cursor.fetchall()
+        if not recs:
+            bot.send_message(call.message.chat.id, "Нет новых клиентских рекомендаций.")
+            return
+        for rec in recs:
+            rec_id, user_id, username, hashtag, contact, desc = rec
+            msg = f"ID {rec_id} | От @{username or 'нет'} | #{hashtag}\nКонтакт: {contact}\nОписание: {desc}"
+            markup = types.InlineKeyboardMarkup()
+            markup.add(
+                types.InlineKeyboardButton("✅ Принять", callback_data=f"clientrec_approve_{rec_id}"),
+                types.InlineKeyboardButton("❌ Отклонить", callback_data=f"clientrec_reject_{rec_id}")
+            )
+            bot.send_message(call.message.chat.id, msg, reply_markup=markup)
+        bot.answer_callback_query(call.id)
+    elif cmd == 'stats':
+        stats = get_stats()
+        bot.send_message(call.message.chat.id, stats, parse_mode='Markdown')
+        bot.answer_callback_query(call.id)
+    elif cmd == 'publish_delayed':
+        publish_delayed_requests()
+        bot.send_message(call.message.chat.id, "✅ Отложенные заявки опубликованы.")
+        bot.answer_callback_query(call.id)
+
+def get_stats():
+    cursor.execute("SELECT COUNT(*) FROM users")
+    total_users = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM masters WHERE status = 'активен'")
+    active_masters = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM requests WHERE status = 'активна'")
+    active_requests = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM reviews WHERE status = 'approved'")
+    approved_reviews = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM master_applications WHERE status = 'На проверке'")
+    pending_apps = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM recommendations WHERE status = 'на модерации'")
+    pending_recs = cursor.fetchone()[0]
+    return f"""
+📊 **СТАТИСТИКА**
+
+👥 Всего пользователей: {total_users}
+👷 Активных мастеров: {active_masters}
+📋 Активных заявок: {active_requests}
+⭐ Одобренных отзывов: {approved_reviews}
+⏳ Заявок мастеров на проверке: {pending_apps}
+👍 Рекомендаций на модерации: {pending_recs}
+    """
+
+# ================ ОБРАБОТЧИКИ ДЛЯ КЛИЕНТСКИХ РЕКОМЕНДАЦИЙ (АДМИН) ================
+@bot.callback_query_handler(func=lambda call: call.data.startswith('clientrec_'))
+def clientrec_callback(call):
+    if call.from_user.id != ADMIN_ID:
+        bot.answer_callback_query(call.id, "❌ Нет прав")
+        return
+    parts = call.data.split('_')
+    action = parts[1]
+    rec_id = int(parts[2])
+    if action == 'approve':
+        cursor.execute("UPDATE client_recommendations SET status = 'approved' WHERE id = ?", (rec_id,))
+        conn.commit()
+        bot.answer_callback_query(call.id, "✅ Рекомендация одобрена")
+        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+        bot.send_message(call.message.chat.id, f"Рекомендация {rec_id} одобрена. Используйте /add_from_rec {rec_id} для создания анкеты мастера.")
+    elif action == 'reject':
+        cursor.execute("UPDATE client_recommendations SET status = 'rejected' WHERE id = ?", (rec_id,))
+        conn.commit()
+        bot.answer_callback_query(call.id, "❌ Рекомендация отклонена")
+        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+        bot.send_message(call.message.chat.id, f"Рекомендация {rec_id} отклонена.")
+
+# ================ ОБРАБОТЧИКИ ДЛЯ ЗАЯВОК МАСТЕРОВ (АДМИН) ================
+@bot.callback_query_handler(func=lambda call: call.data.startswith('app_'))
+def app_callback(call):
+    if call.from_user.id != ADMIN_ID:
+        bot.answer_callback_query(call.id, "❌ Нет прав")
+        return
+    parts = call.data.split('_')
+    action = parts[1]
+    app_id = int(parts[2])
+    if action == 'approve':
+        cursor.execute('''SELECT user_id, name, service, phone, districts, price_min,
+                          experience, bio, portfolio, documents, entity_type, verification_type,
+                          documents_list, payment_methods, preferred_contact, age_group, source
+                          FROM master_applications WHERE id = ?''', (app_id,))
+        app = cursor.fetchone()
+        if not app:
+            bot.answer_callback_query(call.id, "❌ Анкета не найдена")
+            return
+        (user_id, name, service, phone, districts, price_min,
+         experience, bio, portfolio, documents, entity_type, verification_type,
+         documents_list, payment_methods, preferred_contact, age_group, source) = app
+
+        now = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+        cursor.execute('''INSERT INTO masters
+                        (user_id, name, service, phone, districts, price_min, price_max,
+                         experience, bio, portfolio, documents, entity_type, verification_type,
+                         documents_list, payment_methods, preferred_contact, age_group,
+                         source, status, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                        (user_id, name, service, phone, districts, price_min, '',
+                         experience, bio, portfolio, documents, entity_type, verification_type,
+                         documents_list, payment_methods, preferred_contact, age_group,
+                         source, 'активен', now))
+        conn.commit()
+        master_id = cursor.lastrowid
+        cursor.execute("DELETE FROM master_applications WHERE id = ?", (app_id,))
+        conn.commit()
+        try:
+            bot.send_message(
+                user_id,
+                f"✅ Ваша анкета одобрена! Вы добавлены в базу мастеров. Приглашаем в закрытый чат мастеров: {MASTER_CHAT_INVITE_LINK}"
+            )
+        except:
+            pass
+        publish_master_card(master_id, name, service, districts, price_min, experience, bio, portfolio)
+        bot.answer_callback_query(call.id, "✅ Одобрено")
+        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+        bot.send_message(call.message.chat.id, f"Мастер {name} добавлен (ID {master_id}).")
+    elif action == 'reject':
+        cursor.execute('SELECT user_id FROM master_applications WHERE id = ?', (app_id,))
+        row = cursor.fetchone()
+        if row:
+            user_id = row[0]
+            cursor.execute("DELETE FROM master_applications WHERE id = ?", (app_id,))
+            conn.commit()
+            try:
+                bot.send_message(user_id, "❌ Ваша анкета отклонена. Свяжитесь с администратором для уточнения причин.")
+            except:
+                pass
+        bot.answer_callback_query(call.id, "❌ Отклонено")
+        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+        bot.send_message(call.message.chat.id, f"Анкета {app_id} отклонена.")
+
+# ================ ОБРАБОТЧИКИ ДЛЯ ОТЗЫВОВ (АДМИН) ================
+@bot.callback_query_handler(func=lambda call: call.data.startswith('rev_'))
+def review_callback(call):
+    if call.from_user.id != ADMIN_ID:
+        bot.answer_callback_query(call.id, "❌ Нет прав")
+        return
+    parts = call.data.split('_')
+    action = parts[1]
+    rev_id = int(parts[2])
+    if action == 'approve':
+        cursor.execute("UPDATE reviews SET status = 'approved' WHERE id = ?", (rev_id,))
+        conn.commit()
+        cursor.execute('SELECT master_id, rating FROM reviews WHERE id = ?', (rev_id,))
+        master_id, rating = cursor.fetchone()
+        cursor.execute('''UPDATE masters SET 
+                          rating = (SELECT AVG(rating) FROM reviews WHERE master_id = ? AND status = 'approved'),
+                          reviews_count = (SELECT COUNT(*) FROM reviews WHERE master_id = ? AND status = 'approved')
+                          WHERE id = ?''', (master_id, master_id, master_id))
+        conn.commit()
+        bot.answer_callback_query(call.id, "✅ Отзыв одобрен")
+        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+    elif action == 'reject':
+        cursor.execute("DELETE FROM reviews WHERE id = ?", (rev_id,))
+        conn.commit()
+        bot.answer_callback_query(call.id, "❌ Отзыв отклонён")
+        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+
+# ================ ОБРАБОТЧИКИ ДЛЯ РЕКОМЕНДАЦИЙ (АДМИН) ================
+@bot.callback_query_handler(func=lambda call: call.data.startswith('rec_'))
+def rec_callback(call):
+    if call.from_user.id != ADMIN_ID:
+        bot.answer_callback_query(call.id, "❌ Нет прав")
+        return
+    parts = call.data.split('_')
+    action = parts[1]
+    rec_id = int(parts[2])
+    if action == 'approve':
+        cursor.execute("UPDATE recommendations SET status = 'approved' WHERE id = ?", (rec_id,))
+        conn.commit()
+        bot.answer_callback_query(call.id, "✅ Рекомендация одобрена")
+        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+        bot.send_message(call.message.chat.id, f"Рекомендация {rec_id} одобрена. Для создания анкеты используйте данные из неё.")
+    elif action == 'reject':
+        cursor.execute("DELETE FROM recommendations WHERE id = ?", (rec_id,))
+        conn.commit()
+        bot.answer_callback_query(call.id, "❌ Рекомендация отклонена")
+        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+
+# ================ ОТЛОЖЕННЫЕ ЗАЯВКИ ПРИ ЗАПУСКЕ ================
+@bot.message_handler(commands=['publish_delayed'])
+def manual_publish_delayed(message):
+    if message.from_user.id != ADMIN_ID:
+        bot.reply_to(message, "❌ Нет прав.")
+        return
+    publish_delayed_requests()
+    bot.reply_to(message, "✅ Попытка публикации отложенных заявок выполнена.")
 
 # ================ ЗАПУСК БОТА ================
 if __name__ == '__main__':
@@ -1818,4 +2559,4 @@ if __name__ == '__main__':
     stop_other_instances()
     time.sleep(2)
 
-    bot.infinity_polling(skip_pending=True) 
+    bot.infinity_polling(skip_pending=True)
