@@ -1209,10 +1209,35 @@ def save_app_callback(call):
     if call.from_user.id != user_id:
         bot.answer_callback_query(call.id, "❌ Это не ваша анкета")
         return
-    user_data = bot.master_data[user_id]
+    user_data = bot.master_data.get(user_id)
+    if not user_data:
+        bot.answer_callback_query(call.id, "❌ Данные не найдены")
+        return
     try:
-        save_master_application(call.message, user_id, user_data)
+        app_id = save_master_application(call.message, user_id, user_data)
         bot.answer_callback_query(call.id, "✅ Анкета отправлена!")
+        # Сообщение об успехе
+        bot.send_message(call.message.chat.id, "✅ Ваша анкета успешно отправлена на модерацию!")
+
+        # Если мастер согласился на проверку документов
+        if user_data.get('documents_verified') == 'pending':
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("📎 Отправить документы", callback_data=f"send_docs_{app_id}"))
+            bot.send_message(
+                call.message.chat.id,
+                "Вы выбрали вариант с проверкой документов. Теперь вы можете отправить фото/скан документов администратору.",
+                reply_markup=markup
+            )
+        # Если мастер отметил, что хочет отправить фото позже, предложим после документов
+        # (будет обработано в send_docs_callback)
+
+        # Показываем главное меню мастера
+        show_role_menu(call.message, 'master')
+
+        # Очищаем временные данные только после всех предложений
+        if user_id in bot.master_data:
+            del bot.master_data[user_id]
+
     except Exception as e:
         bot.answer_callback_query(call.id, "❌ Ошибка сохранения")
         bot.send_message(call.message.chat.id, f"❌ Ошибка: {e}")
