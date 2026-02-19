@@ -1222,8 +1222,6 @@ def save_app_callback(call):
 @bot.callback_query_handler(func=lambda call: call.data == 'cancel_app')
 def cancel_app_callback(call):
     user_id = call.from_user.id
-    if user_id in bot.master_data:
-        del bot.master_data[user_id]
     bot.edit_message_text("❌ Создание анкеты отменено.", call.message.chat.id, call.message.message_id)
     bot.answer_callback_query(call.id)
 def save_master_application(message, user_id, user_data):
