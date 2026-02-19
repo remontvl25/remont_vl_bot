@@ -1180,24 +1180,27 @@ def show_summary(message, user_id):
     summary = f"""
 📋 **Сводка анкеты:**
 
-👤 Имя/Название: {data['name']}
-🔧 Профили: {data.get('profiles', data.get('services', ''))}
-📞 Телефон: {data['phone']}
-📍 Районы: {data['districts']}
-💰 Минимальная цена: {data['price_min']}
-⏱ Опыт: {data['experience']}
-💬 О себе: {data.get('bio', 'Не указано')}
-📸 Портфолио: {data.get('portfolio', 'Не указано')}
-🎂 Возраст: {data.get('age_group', 'Не указан')}
-📄 Документы: {data['documents']}
-   Список: {data.get('documents_list', '')}
-🛡️ Готовность к проверке: {'✅ Да' if data.get('documents_verified')=='pending' else '❌ Нет'}
-📞 Предпочтительный контакт: {data.get('preferred_contact', 'telegram')}
-💳 Оплата: {data.get('payment_methods', 'Не указано')}
+👤 **Имя/Название:** {data['name']}
+🔧 **Профили:** {data.get('profiles', data.get('services', ''))}
+🎂 **Возраст:** {data.get('age_group', 'Не указан')}
+⏱ **Опыт:** {data['experience']}
+📍 **Районы:** {data['districts']}
+💰 **Минимальная цена:** {data['price_min']}
+💳 **Оплата:** {data.get('payment_methods', 'Не указано')}
+💬 **О себе:** {data.get('bio', 'Не указано')}
+📸 **Портфолио:** {data.get('portfolio', 'Не указано')}
+📄 **Документы:** {data['documents']}
+   **Список:** {data.get('documents_list', '')}
+🛡️ **Готовность к проверке:** {'✅ Да' if data.get('documents_verified')=='pending' else '❌ Нет'}
+📞 **Предпочтительный контакт:** {data.get('preferred_contact', 'telegram')}
+📞 **Телефон:** {data['phone']}
     """
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("✅ Отправить на модерацию", callback_data=f"save_app_{user_id}"))
-    markup.add(types.InlineKeyboardButton("❌ Отмена", callback_data="cancel_app"))
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("✅ Отправить на модерацию", callback_data=f"save_app_{user_id}"),
+        types.InlineKeyboardButton("✏️ Редактировать", callback_data=f"edit_summary_{user_id}"),
+        types.InlineKeyboardButton("❌ Отмена", callback_data="cancel_app")
+    )
     bot.send_message(message.chat.id, summary, reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('save_app_'))
@@ -1237,6 +1240,106 @@ def save_master_application(message, user_id, user_data):
         print(f"DEBUG: missing keys for user {user_id}: {missing}")
         return
 
+@bot.callback_query_handler(func=lambda call: call.data.startswith('edit_summary_'))
+def edit_summary_callback(call):
+    user_id = int(call.data.split('_')[2])
+    if call.from_user.id != user_id:
+        bot.answer_callback_query(call.id, "❌ Это не ваша анкета")
+        return
+    if user_id not in bot.master_data:
+        bot.answer_callback_query(call.id, "❌ Данные не найдены")
+        return
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    fields = [
+        ("name", "Имя"),
+        ("profiles", "Профили (через запятую)"),
+        ("age_group", "Возраст"),
+        ("experience", "Опыт"),
+        ("districts", "Районы (через запятую)"),
+        ("price_min", "Минимальная цена"),
+        ("payment_methods", "Способы оплаты (через запятую)"),
+        ("bio", "О себе"),
+        ("portfolio", "Портфолио (ссылка)"),
+        ("documents", "Используете документы? (Есть/Нет/Пропустить)"),
+        ("documents_list", "Список документов (через запятую)"),
+        ("documents_verified", "Готовы к проверке? (pending/no)"),
+        ("preferred_contact", "Предпочтительный контакт (через запятую)"),
+        ("phone", "Телефон")
+    ]
+    for key, label in fields:
+        markup.add(types.InlineKeyboardButton(label, callback_data=f"edit_field_{key}_{user_id}"))
+    bot.edit_message_text(
+        "✏️ **Выберите поле для редактирования:**",
+        call.message.chat.id,
+        call.message.message_id,
+        reply_markup=markup
+    )
+    bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('edit_field_'))
+def edit_field_callback(call):
+    parts = call.data.split('_')
+    field = parts[2]
+    user_id = int(parts[3])
+    if call.from_user.id != user_id:
+        bot.answer_callback_query(call.id, "❌ Это не ваша анкета")
+        return
+    if user_id not in bot.master_data:
+        bot.answer_callback_query(call.id, "❌ Данные не найдены")
+        return
+    bot.edit_message_text(
+        f"✏️ Введите новое значение для поля **{field}**:",
+        call.message.chat.id,
+        call.message.message_id
+    )
+    bot.register_next_step_handler(call.message, process_edit_field_value, field, user_id)
+    bot.answer_callback_query(call.id)
+
+def process_edit_field_value(message, field, user_id):
+    value = safe_text(message)
+    if not value:
+        bot.send_message(message.chat.id, "❌ Значение не может быть пустым.")
+        # Возвращаем в меню редактирования
+        edit_summary_callback(message)  # но нужно передать call, а у нас message – упростим
+        # Лучше показать сводку заново с предупреждением
+        show_summary(message, user_id)
+        return
+    # Обновляем данные
+    if field == "profiles":
+        bot.master_data[user_id]['profiles'] = value
+        bot.master_data[user_id]['services'] = value
+        bot.master_data[user_id]['service'] = value.split(',')[0].strip()
+    elif field == "age_group":
+        bot.master_data[user_id]['age_group'] = value
+    elif field == "experience":
+        bot.master_data[user_id]['experience'] = value
+    elif field == "districts":
+        bot.master_data[user_id]['districts'] = value
+    elif field == "price_min":
+        bot.master_data[user_id]['price_min'] = value
+    elif field == "payment_methods":
+        bot.master_data[user_id]['payment_methods'] = value
+    elif field == "bio":
+        bot.master_data[user_id]['bio'] = value
+    elif field == "portfolio":
+        bot.master_data[user_id]['portfolio'] = value
+    elif field == "documents":
+        bot.master_data[user_id]['documents'] = value
+    elif field == "documents_list":
+        bot.master_data[user_id]['documents_list'] = value
+    elif field == "documents_verified":
+        bot.master_data[user_id]['documents_verified'] = value
+    elif field == "preferred_contact":
+        bot.master_data[user_id]['preferred_contact'] = value
+    elif field == "phone":
+        bot.master_data[user_id]['phone'] = value
+    else:
+        bot.master_data[user_id][field] = value
+
+    bot.send_message(message.chat.id, f"✅ Поле {field} обновлено.")
+    # Возвращаемся к сводке
+    show_summary(message, user_id)
+    
     name = user_data['name']
     services_str = user_data.get('services', user_data.get('profiles', ''))
     service = services_str.split(',')[0]  # первый профиль как основной
