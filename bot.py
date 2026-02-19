@@ -1345,7 +1345,9 @@ def send_docs_callback(call):
     )
     bot.register_next_step_handler(call.message, process_docs_for_verification, app_id)
     bot.answer_callback_query(call.id)
-    @bot.callback_query_handler(func=lambda call: call.data.startswith('send_photo_'))
+
+# ================ ОБРАБОТЧИК ОТПРАВКИ ФОТО ДЛЯ ПОРТФОЛИО ================
+@bot.callback_query_handler(func=lambda call: call.data.startswith('send_photo_'))
 def send_photo_callback(call):
     app_id = int(call.data.split('_')[2])
     bot.send_message(
@@ -1371,7 +1373,6 @@ def process_photo_for_portfolio(message, app_id):
 def process_docs_for_verification(message, app_id):
     if message.photo:
         file_id = message.photo[-1].file_id
-        # Пересылаем админу
         bot.send_photo(
             ADMIN_ID,
             file_id,
@@ -1383,9 +1384,8 @@ def process_docs_for_verification(message, app_id):
         )
     else:
         bot.send_message(message.chat.id, "❌ Пожалуйста, отправьте фото.")
-        # Можно повторить запрос
         bot.register_next_step_handler(message, process_docs_for_verification, app_id)
-
+        
 # ================ КНОПКА "МОЯ АНКЕТА" (для активного мастера) ================
 @bot.message_handler(func=lambda message: message.text == '👤 Моя анкета')
 def my_profile(message):
