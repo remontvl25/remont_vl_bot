@@ -425,6 +425,7 @@ def show_role_menu(message, role):
         markup.row('🔨 Оставить заявку', '🔍 Найти мастера')
         markup.row('⭐ Оставить отзыв', '👍 Рекомендовать мастера')
         markup.row('📢 Канал с мастерами', '📋 Мои заявки')
+        markup.row('🔄 Сменить роль')
         text = "👋 **Режим: Клиент**\n\n• Ищете мастера? Оставьте заявку или выберите из каталога.\n• Понравился мастер? Оставьте отзыв.\n• Знаете хорошего специалиста? Порекомендуйте его!"
 
     elif role == 'master':
@@ -432,23 +433,34 @@ def show_role_menu(message, role):
         if status_type == 'active':
             markup.row('👤 Моя анкета', '📋 Активные заявки')
             markup.row('📢 Канал с мастерами', '✉️ Написать админу')
+            if user_id == ADMIN_ID:
+                markup.row('👑 Админ-панель')
+            markup.row('🔄 Сменить роль')
             text = "👋 **Режим: Мастер**\n\n✅ Вы активны и получаете уведомления о новых заявках.\n• «Моя анкета» – просмотр и редактирование.\n• «Активные заявки» – отклики на заявки."
         elif status_type == 'pending':
             markup.row('👤 Статус анкеты', '❌ Отозвать анкету')
             markup.row('📢 Канал с мастерами', '✉️ Написать админу')
+            if user_id == ADMIN_ID:
+                markup.row('👑 Админ-панель')
+            markup.row('🔄 Сменить роль')
             text = "👋 **Режим: Мастер**\n\n⏳ Ваша анкета на проверке. Вы можете отозвать её или написать администратору."
         else:
             markup.row('👷 Заполнить анкету', '📢 Канал с мастерами')
             markup.row('✉️ Написать админу')
+            if user_id == ADMIN_ID:
+                markup.row('👑 Админ-панель')
+            markup.row('🔄 Сменить роль')
             text = "👋 **Режим: Мастер**\n\nУ вас ещё нет анкеты. Заполните её, чтобы получать заказы."
 
     elif role == 'guest':
         markup.row('🔍 Найти мастера', '📢 Канал с мастерами')
         markup.row('👷 Зарегистрироваться как мастер')
+        markup.row('🔄 Сменить роль')
         text = "👋 **Режим: Гость**\n\n• Вы можете просматривать заявки в канале и искать мастеров.\n• Чтобы участвовать активнее, зарегистрируйтесь как клиент или мастер."
     else:
         markup.row('🔨 Оставить заявку', '🔍 Найти мастера')
         markup.row('📢 Канал с мастерами')
+        markup.row('🔄 Сменить роль')
         text = "👋 Добро пожаловать!"
 
     bot.send_message(message.chat.id, text, reply_markup=markup, parse_mode='Markdown')
@@ -506,7 +518,9 @@ def role_callback(call):
     role = call.data.split('_')[1]
     user_id = call.from_user.id
     now = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
-   
+    if role == 'client':
+        cursor.execute('INSERT OR REPLACE INTO users (user_id, role, first_seen, last_active) VALUES (?, ?, ?, ?)',
+                       (user_id, 'client', now, now))
         conn.commit()
         bot.edit_message_text("✅ Роль сохранена: **Клиент**.", 
                               call.message.chat.id, call.message.message_id, parse_mode='Markdown')
@@ -955,7 +969,6 @@ def skip_portfolio_callback(call):
     bot.master_data[user_id]['portfolio'] = "Не указано"
     show_documents_buttons(call.message.chat.id, user_id)
     bot.answer_callback_query(call.id, "⏩ Пропущено")
-
 @bot.callback_query_handler(func=lambda call: call.data == 'portfolio_send_to_admin')
 def portfolio_send_to_admin_callback(call):
     user_id = call.from_user.id
@@ -973,6 +986,7 @@ def process_master_portfolio_text(message, user_id):
         portfolio = "Не указано"
     bot.master_data[user_id]['portfolio'] = portfolio
     show_documents_buttons(message.chat.id, user_id)
+
 def show_documents_buttons(chat_id, user_id):
     markup = types.InlineKeyboardMarkup(row_width=3)
     markup.add(
@@ -1043,7 +1057,6 @@ def doc_type_callback(call):
         selected = bot.master_data[user_id].get('selected_docs', [])
         bot.master_data[user_id]['documents_list'] = ", ".join(selected)
         bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
-        # Шаг 13 – вопрос о проверке документов
         ask_documents_verification(call.message, user_id)
         bot.answer_callback_query(call.id, "✅ Список документов сохранён")
     else:
@@ -1057,7 +1070,7 @@ def doc_type_callback(call):
         else:
             selected.append(doc_name)
         bot.master_data[user_id]['selected_docs'] = selected
-        ask_doc_types_multiple(call.message.chat.id, user_id)
+        ask_doc_types_multiple(call.message.chat.id, user_id)   # ← перерисовка
         bot.answer_callback_query(call.id)
 
 def ask_documents_verification(message, user_id):
@@ -1491,7 +1504,7 @@ def finish_docs_callback(call):
     bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
     bot.send_message(call.message.chat.id, "✅ Вы завершили отправку. Спасибо!")
     show_role_menu(call.message, 'master')
-    bot.answer_callback_query(call.id)    
+    bot.answer_callback_query(call.id)
 # ================ ФУНКЦИЯ УВЕДОМЛЕНИЯ МАСТЕРОВ ================
 def notify_masters_about_new_request(request_id, request_data):
     """Уведомляет мастеров, чьи профили и районы соответствуют заявке."""
@@ -2297,6 +2310,50 @@ def process_recommend_desc(message):
     except:
         pass
 
+# ================ СМЕНА РОЛИ ================
+@bot.message_handler(func=lambda message: message.text == '🔄 Сменить роль')
+def change_role_start(message):
+    if not only_private(message):
+        return
+    markup = types.InlineKeyboardMarkup()
+    markup.add(
+        types.InlineKeyboardButton("✅ Да, сменить роль", callback_data="confirm_change_role"),
+        types.InlineKeyboardButton("❌ Отмена", callback_data="cancel_change_role")
+    )
+    bot.send_message(
+        message.chat.id,
+        "⚠️ **Внимание!** Смена роли приведёт к удалению всех ваших заявок, анкет, отзывов и рекомендаций. Это действие необратимо. Продолжить?",
+        reply_markup=markup
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data == "confirm_change_role")
+def confirm_change_role(call):
+    user_id = call.from_user.id
+    cursor.execute("DELETE FROM requests WHERE user_id = ?", (user_id,))
+    cursor.execute("DELETE FROM master_applications WHERE user_id = ?", (user_id,))
+    cursor.execute("DELETE FROM masters WHERE user_id = ?", (user_id,))
+    cursor.execute("DELETE FROM responses WHERE master_id IN (SELECT id FROM masters WHERE user_id = ?)", (user_id,))
+    cursor.execute("DELETE FROM reviews WHERE user_id = ?", (user_id,))
+    cursor.execute("DELETE FROM recommendations WHERE user_id = ?", (user_id,))
+    cursor.execute("DELETE FROM client_recommendations WHERE user_id = ?", (user_id,))
+    cursor.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
+    conn.commit()
+    bot.edit_message_text("✅ Ваши данные удалены. Используйте /start для выбора новой роли.", call.message.chat.id, call.message.message_id)
+    bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda call: call.data == "cancel_change_role")
+def cancel_change_role(call):
+    bot.edit_message_text("❌ Смена роли отменена.", call.message.chat.id, call.message.message_id)
+    bot.answer_callback_query(call.id)
+
+# ================ КНОПКА "АДМИН-ПАНЕЛЬ" ================
+@bot.message_handler(func=lambda message: message.text == '👑 Админ-панель')
+def admin_panel_button(message):
+    if message.from_user.id != ADMIN_ID:
+        bot.reply_to(message, "❌ Нет прав.")
+        return
+    admin_panel(message)
+
 # ================ АДМИНИСТРАТИВНЫЕ КОМАНДЫ ================
 @bot.message_handler(commands=['approve'])
 def approve_master(message):
@@ -2376,7 +2433,6 @@ def reject_master(message):
         bot.reply_to(message, f"❌ Ошибка: {e}")
 
 def publish_master_card(master_id, name, service, districts, price_min, experience, bio, portfolio):
-    # Убедимся, что в portfolio не попал телефон
     if portfolio and portfolio.strip() and portfolio != 'Не указано':
         portfolio_text = portfolio
     else:
