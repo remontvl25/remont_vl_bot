@@ -388,6 +388,37 @@ def publish_delayed_requests():
         except Exception as e:
             print(f"Ошибка публикации отложенной заявки {req_id}: {e}")
 
+def notify_masters_about_new_request(request_id, request_data):
+    """Уведомляет мастеров, чья специализация и районы соответствуют заявке."""
+    service = request_data['service'].lower()
+    district = request_data['district'].lower()
+
+    cursor.execute('''SELECT user_id, name, service, districts FROM masters WHERE status = 'активен' ''')
+    masters = cursor.fetchall()
+    notified = 0
+    for master in masters:
+        master_user_id, master_name, master_service, master_districts = master
+        # Проверяем совпадение профиля (по ключевым словам, можно точнее)
+        service_match = any(prof.strip().lower() in master_service.lower() for prof in service.split())
+        # Проверяем совпадение района (хотя бы один из районов мастера присутствует в district)
+        district_match = any(d.strip().lower() in district for d in master_districts.split(','))
+        if service_match and district_match:
+            try:
+                bot.send_message(
+                    master_user_id,
+                    f"🔔 **Новая заявка #{request_id}**\n\n"
+                    f"🔧 Профиль: {request_data['service']}\n"
+                    f"📝 Описание: {request_data['description']}\n"
+                    f"📍 Район: {request_data['district']}\n"
+                    f"📅 Срок: {request_data['date']}\n"
+                    f"💰 Бюджет: {request_data['budget']}\n\n"
+                    f"Чтобы откликнуться, используйте команду /respond {request_id} или найдите заявку в разделе «Активные заявки»."
+                )
+                notified += 1
+            except Exception as e:
+                print(f"Не удалось уведомить мастера {master_user_id}: {e}")
+    print(f"Уведомлено {notified} мастеров по заявке #{request_id}")
+    
 def get_master_status(user_id):
     """Возвращает кортеж (тип, статус) для пользователя-мастера."""
     cursor.execute("SELECT status FROM masters WHERE user_id = ?", (user_id,))
