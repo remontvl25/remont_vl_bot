@@ -423,6 +423,54 @@ def show_role_menu(message, role):
     user_id = message.from_user.id
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
 
+    # ================ СТАРТ / ВЫБОР РОЛИ ================
+@bot.message_handler(commands=['start'])
+def start(message):
+    print(f"DEBUG: start вызван от user {message.from_user.id}")
+    if message.chat.type != 'private':
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton(
+            "🤖 Перейти в бота",
+            url=BOT_LINK
+        ))
+        bot.reply_to(
+            message,
+            "👋 Добро пожаловать в бот заявок на ремонт!\n\n"
+            "📌 В этом чате я только публикую заявки и отзывы.\n\n"
+            "👇 Вся работа со мной — в личных сообщениях:\n"
+            f"👉 @{BOT_USERNAME}\n\n"
+            "Там вы можете:\n"
+            "✅ Оставить заявку\n"
+            "✅ Найти мастера в каталоге\n"
+            "✅ Стать мастером и добавить анкету\n"
+            "✅ Оставить отзыв или рекомендацию\n"
+            "✅ Проверить статус анкеты",
+            reply_markup=markup
+        )
+        return
+
+    user_id = message.from_user.id
+    cursor.execute('SELECT role FROM users WHERE user_id = ?', (user_id,))
+    row = cursor.fetchone()
+    if not row:
+        markup = types.InlineKeyboardMarkup(row_width=3)
+        markup.add(
+            types.InlineKeyboardButton("🔨 Клиент", callback_data="role_client"),
+            types.InlineKeyboardButton("👷 Мастер", callback_data="role_master"),
+            types.InlineKeyboardButton("👀 Гость", callback_data="role_guest")
+        )
+        bot.send_message(
+            message.chat.id,
+            "👋 **Добро пожаловать!**\n\nКто вы? Выберите роль, чтобы мы могли предложить нужный функционал.\n\n"
+            "• Клиент – ищете мастеров, оставляете заявки и отзывы.\n"
+            "• Мастер – хотите получать заказы.\n"
+            "• Гость – просто посмотреть, без регистрации.",
+            reply_markup=markup
+        )
+    else:
+        role = row[0]
+        show_role_menu(message, role)
+
     if role == 'client':
         markup.row('🔨 Оставить заявку', '🔍 Найти мастера')
         markup.row('⭐ Оставить отзыв', '👍 Рекомендовать мастера')
