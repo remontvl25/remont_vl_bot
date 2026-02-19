@@ -640,6 +640,7 @@ def entity_callback(call):
     bot.answer_callback_query(call.id)
 
 def process_master_name(message):
+    print(f"DEBUG: process_master_name вызвана для user {message.from_user.id}")
     if message.chat.type != 'private':
         return
     name = safe_text(message)
@@ -653,6 +654,7 @@ def process_master_name(message):
     ask_profiles_multiple(message.chat.id, user_id)
 
 def ask_profiles_multiple(chat_id, user_id):
+    print(f"DEBUG: ask_profiles_multiple вызвана для user {user_id}")
     markup = types.InlineKeyboardMarkup(row_width=1)
     if 'selected_profiles' not in bot.master_data[user_id]:
         bot.master_data[user_id]['selected_profiles'] = []
