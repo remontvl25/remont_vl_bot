@@ -774,7 +774,7 @@ def process_master_name(message):
         "9 - Полный комплекс\n\n"
         "👉 Пример: `1, 3, 8` или `сантехник, электрик, дизайнер`"
     )
-    bot.register_next_step_handler(msg, process_master_services)
+    ask_services_multiple(message.chat.id, user_id)
 
 def ask_services_multiple(chat_id, user_id):
     markup = types.InlineKeyboardMarkup(row_width=1)
