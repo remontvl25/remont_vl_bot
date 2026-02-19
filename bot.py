@@ -506,9 +506,7 @@ def role_callback(call):
     role = call.data.split('_')[1]
     user_id = call.from_user.id
     now = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
-    if role == 'client':
-        cursor.execute('INSERT OR REPLACE INTO users (user_id, role, first_seen, last_active) VALUES (?, ?, ?, ?)',
-                       (user_id, 'client', now, now))
+   
         conn.commit()
         bot.edit_message_text("✅ Роль сохранена: **Клиент**.", 
                               call.message.chat.id, call.message.message_id, parse_mode='Markdown')
