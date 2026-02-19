@@ -302,8 +302,7 @@ PAYMENT_METHODS = [
     ("cash", "Наличные"),
     ("card", "Карта"),
     ("transfer", "Перевод на карту"),
-    ("account", "Расчётный счёт"),
-    ("crypto", "Криптовалюта")
+    ("account", "Расчётный счёт")
 ]
 PAYMENT_DICT = {code: name for code, name in PAYMENT_METHODS}
 
