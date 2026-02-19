@@ -2476,15 +2476,15 @@ def admin_panel(message):
         bot.reply_to(message, "❌ Нет прав.")
         return
     markup = types.InlineKeyboardMarkup(row_width=2)
-   markup.add(
-    types.InlineKeyboardButton("📋 Заявки мастеров", callback_data="admin_apps"),
-    types.InlineKeyboardButton("📝 Отзывы на модерации", callback_data="admin_reviews"),
-    types.InlineKeyboardButton("👍 Рекомендации", callback_data="admin_recs"),
-    types.InlineKeyboardButton("📢 Клиентские рекомендации", callback_data="admin_client_recs"),
-    types.InlineKeyboardButton("📊 Статистика", callback_data="admin_stats"),
-    types.InlineKeyboardButton("🚀 Опубликовать отложенные", callback_data="admin_publish_delayed"),
-    types.InlineKeyboardButton("➕ Добавить мастера вручную", callback_data="admin_manual_add")  # новая кнопка
-)
+    markup.add(
+        types.InlineKeyboardButton("📋 Заявки мастеров", callback_data="admin_apps"),
+        types.InlineKeyboardButton("📝 Отзывы на модерации", callback_data="admin_reviews"),
+        types.InlineKeyboardButton("👍 Рекомендации", callback_data="admin_recs"),
+        types.InlineKeyboardButton("📢 Клиентские рекомендации", callback_data="admin_client_recs"),
+        types.InlineKeyboardButton("📊 Статистика", callback_data="admin_stats"),
+        types.InlineKeyboardButton("🚀 Опубликовать отложенные", callback_data="admin_publish_delayed"),
+        types.InlineKeyboardButton("➕ Добавить мастера вручную", callback_data="admin_manual_add")
+    )
     bot.send_message(message.chat.id, "🔧 **Панель администратора**", reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('admin_'))
