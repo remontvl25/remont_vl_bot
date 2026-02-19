@@ -902,7 +902,7 @@ def skip_portfolio_callback(call):
         bot.answer_callback_query(call.id, "❌ Начните анкету заново")
         return
     bot.master_data[user_id]['portfolio'] = "Не указано"
-    ask_age(call.message.chat.id, user_id)
+    show_documents_buttons(call.message.chat.id, user_id)
     bot.answer_callback_query(call.id, "⏩ Пропущено")
 
 @bot.callback_query_handler(func=lambda call: call.data == 'portfolio_send_to_admin')
@@ -922,7 +922,7 @@ def process_master_portfolio_text(message, user_id):
     if not portfolio or portfolio.lower() == "пропустить":
         portfolio = "Не указано"
     bot.master_data[user_id]['portfolio'] = portfolio
-    ask_age(message.chat.id, user_id)
+    show_documents_buttons(message.chat.id, user_id)
 
 def ask_age(chat_id, user_id):
     markup = types.InlineKeyboardMarkup(row_width=3)
@@ -1040,7 +1040,7 @@ def doc_type_callback(call):
         else:
             selected.append(doc_name)
         bot.master_data[user_id]['selected_docs'] = selected
-        ask_doc_types_multiple(call.message.chat.id, user_id)
+        ask_doc_types_multiple(call.message.chat.id, user_id)   # ← здесь перерисовка, а не переход
         bot.answer_callback_query(call.id)
 
 def ask_documents_verification(message, user_id):
