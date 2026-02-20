@@ -1067,7 +1067,8 @@ def doc_type_callback(call):
         else:
             selected.append(doc_name)
         bot.master_data[user_id]['selected_docs'] = selected
-        ask_doc_types_multiple(call.message.chat.id, user_id)   # ← перерисовка клавиатуры
+        # ВАЖНО: здесь должна быть перерисовка клавиатуры, а не переход дальше
+        ask_doc_types_multiple(call.message.chat.id, user_id)
         bot.answer_callback_query(call.id)
 
 def ask_documents_verification(message, user_id):
@@ -1169,6 +1170,8 @@ def process_master_phone_final(message, user_id):
 
 def show_summary(message, user_id):
     data = bot.master_data[user_id]
+    print(f"DEBUG: portfolio={data.get('portfolio', 'None')}, phone={data['phone']}, documents_list={data.get('documents_list', 'None')}")
+    # ... остальной код
     summary = f"""
 📋 **Сводка анкеты:**
 
