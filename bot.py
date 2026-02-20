@@ -2809,11 +2809,11 @@ def admin_district_callback(call):
         bot.answer_callback_query(call.id, "❌ Нет прав")
         return
     user_id = call.from_user.id
-    data = call.data[11:]
+    data = call.data[11:]  # убираем 'admin_dist_'
     if data == "done":
         selected = bot.admin_add_data[user_id].get('selected_districts', [])
         if not selected:
- bot.answer_callback_query(call.id, "❌ Выберите хотя бы один район")
+            bot.answer_callback_query(call.id, "❌ Выберите хотя бы один район")
             return
         bot.admin_add_data[user_id]['districts'] = ", ".join(selected)
         bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
