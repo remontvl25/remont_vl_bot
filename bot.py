@@ -239,7 +239,7 @@ def add_column_if_not_exists(table, column, col_type):
             print(f"ℹ️ Колонка {column} уже существует в {table}")
         else:
             print(f"⚠️ Ошибка при добавлении {column} в {table}: {e}")
-
+            
 add_column_if_not_exists('master_applications', 'verification_type', "TEXT DEFAULT 'simple'")
 add_column_if_not_exists('master_applications', 'documents_list', "TEXT DEFAULT ''")
 add_column_if_not_exists('master_applications', 'payment_methods', "TEXT DEFAULT ''")
