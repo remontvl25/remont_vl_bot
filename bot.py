@@ -1026,12 +1026,13 @@ def documents_callback(call):
     bot.answer_callback_query(call.id)
 
 def ask_doc_types_multiple(chat_id, user_id):
-    print(f"DEBUG ask_doc_types_multiple: user={user_id}")
-    markup = types.InlineKeyboardMarkup(row_width=1)
+    # Инициализируем список выбранных документов, если ещё нет
     if 'selected_docs' not in bot.master_data[user_id]:
         bot.master_data[user_id]['selected_docs'] = []
     selected = bot.master_data[user_id]['selected_docs']
-    print(f"DEBUG: current selected={selected}")
+    
+    # Формируем клавиатуру
+    markup = types.InlineKeyboardMarkup(row_width=1)
     for code, name in DOC_TYPES:
         prefix = "✅ " if name in selected else ""
         markup.add(types.InlineKeyboardButton(
@@ -1039,31 +1040,47 @@ def ask_doc_types_multiple(chat_id, user_id):
             callback_data=f"doc_type_{code}"
         ))
     markup.add(types.InlineKeyboardButton("✅ Готово", callback_data="doc_type_done"))
-    bot.send_message(
+    
+    # Если уже есть сохранённый message_id, редактируем то же сообщение
+    if 'doc_message_id' in bot.master_data[user_id]:
+        try:
+            bot.edit_message_reply_markup(
+                chat_id,
+                bot.master_data[user_id]['doc_message_id'],
+                reply_markup=markup
+            )
+            return
+        except Exception as e:
+            print(f"Ошибка редактирования сообщения: {e}. Отправляем новое.")
+    
+    # Если нет сохранённого или редактирование не удалось, отправляем новое сообщение
+    sent = bot.send_message(
         chat_id,
         "📄 **Шаг 12 из 16**\n\n"
         "Какие документы вы можете предоставить при работе? (можно несколько):",
         reply_markup=markup
     )
+    bot.master_data[user_id]['doc_message_id'] = sent.message_id
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('doc_type_'))
 def doc_type_callback(call):
     user_id = call.from_user.id
-    print(f"DEBUG doc_type_callback: user={user_id}, data={call.data}")
     if user_id not in bot.master_data:
         bot.answer_callback_query(call.id, "❌ Начните анкету заново")
         return
     data = call.data[9:]  # убираем 'doc_type_'
+    
     if data == "done":
         selected = bot.master_data[user_id].get('selected_docs', [])
-        print(f"DEBUG: done, selected={selected}")
         bot.master_data[user_id]['documents_list'] = ", ".join(selected)
+        # Удаляем сохранённый message_id, чтобы следующая клавиатура создалась заново
+        if 'doc_message_id' in bot.master_data[user_id]:
+            del bot.master_data[user_id]['doc_message_id']
         bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
         ask_documents_verification(call.message, user_id)
         bot.answer_callback_query(call.id, "✅ Список документов сохранён")
     else:
         doc_name = DOC_TYPES_DICT.get(data)
-        print(f"DEBUG: toggling {doc_name}")
         if not doc_name:
             bot.answer_callback_query(call.id, "❌ Ошибка")
             return
@@ -1073,8 +1090,7 @@ def doc_type_callback(call):
         else:
             selected.append(doc_name)
         bot.master_data[user_id]['selected_docs'] = selected
-        print(f"DEBUG: now selected={selected}")
-        # Здесь обязательно должна быть перерисовка клавиатуры
+        # Обновляем клавиатуру в том же сообщении
         ask_doc_types_multiple(call.message.chat.id, user_id)
         bot.answer_callback_query(call.id)
 
