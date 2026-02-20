@@ -1170,8 +1170,6 @@ def process_master_phone_final(message, user_id):
 
 def show_summary(message, user_id):
     data = bot.master_data[user_id]
-    print(f"DEBUG: portfolio={data.get('portfolio', 'None')}, phone={data['phone']}, documents_list={data.get('documents_list', 'None')}")
-    # ... остальной код
     summary = f"""
 📋 **Сводка анкеты:**
 
