@@ -388,14 +388,18 @@ def publish_delayed_requests():
             print(f"Ошибка публикации отложенной заявки {req_id}: {e}")
 
 def get_master_status(user_id):
+    print(f"DEBUG get_master_status: user_id={user_id}")
     cursor.execute("SELECT status FROM masters WHERE user_id = ?", (user_id,))
     row = cursor.fetchone()
     if row:
+        print(f"DEBUG: найден в masters со статусом {row[0]}")
         return ('active', row[0])
     cursor.execute("SELECT status FROM master_applications WHERE user_id = ?", (user_id,))
     row = cursor.fetchone()
     if row:
+        print(f"DEBUG: найден в master_applications со статусом {row[0]}")
         return ('pending', row[0])
+    print("DEBUG: статус не найден")
     return (None, None)
 
 def check_bot_admin_in_chat(chat_id):
@@ -605,7 +609,7 @@ def become_master(message, verif_type='simple'):
 
     if user_id in bot.master_data:
         del bot.master_data[user_id]
-    bot.master_data[user_id] = {'verification_type': verif_type}
+        bot.master_data[user_id] = {'verification_type': verif_type, 'portfolio': 'Не указано'}
 
     markup = types.InlineKeyboardMarkup(row_width=2)
     markup.add(
@@ -939,7 +943,8 @@ def ask_portfolio(chat_id, user_id):
     markup = types.InlineKeyboardMarkup()
     markup.add(types.InlineKeyboardButton("⏩ Пропустить", callback_data="skip_portfolio"))
     markup.add(types.InlineKeyboardButton("❓ Как загрузить фото?", callback_data="help_portfolio"))
-    markup.add(types.InlineKeyboardButton("📤 Отправить фото админу", callback_data="portfolio_send_to_admin"))
+    if bot.master_data[user_id].get('verification_type') != 'simple':
+        markup.add(types.InlineKeyboardButton("📤 Отправить фото админу", callback_data="portfolio_send_to_admin"))
     bot.send_message(
         chat_id,
         "📸 **Шаг 10 из 16**\n\n"
@@ -992,6 +997,10 @@ def process_master_portfolio_text(message, user_id):
     show_documents_buttons(message.chat.id, user_id)
 
 def show_documents_buttons(chat_id, user_id):
+    if bot.master_data[user_id].get('verification_type') == 'simple':
+        # Для упрощённой регистрации пропускаем документы
+        ask_contact_methods(chat_id, user_id)
+        return
     markup = types.InlineKeyboardMarkup(row_width=3)
     markup.add(
         types.InlineKeyboardButton("✅ Да, использую", callback_data="doc_yes"),
@@ -1202,6 +1211,8 @@ def process_master_phone_final(message, user_id):
 def show_summary(message, user_id):
     data = bot.master_data[user_id]
     summary = f"""
+    if 'portfolio' not in data:
+        data['portfolio'] = 'Не указано'    
 📋 **Сводка анкеты:**
 
 👤 **Имя/Название:** {data['name']}
@@ -1220,8 +1231,12 @@ def show_summary(message, user_id):
 📞 **Телефон:** {data['phone']}
     """
     markup = types.InlineKeyboardMarkup(row_width=2)
+    if data.get('verification_type') == 'simple':
+        btn_text = "✅ Добавить анкету в базу мастеров"
+    else:
+        btn_text = "✅ Отправить на модерацию"
     markup.add(
-        types.InlineKeyboardButton("✅ Отправить на модерацию", callback_data=f"save_app_{user_id}"),
+        types.InlineKeyboardButton(btn_text, callback_data=f"save_app_{user_id}"),
         types.InlineKeyboardButton("✏️ Редактировать", callback_data=f"edit_summary_{user_id}"),
         types.InlineKeyboardButton("❌ Отмена", callback_data="cancel_app")
     )
