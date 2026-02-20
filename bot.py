@@ -1347,26 +1347,56 @@ def save_master_application(message, user_id, user_data):
     preferred_contact = user_data.get('preferred_contact', 'telegram')
     age_group = user_data.get('age_group', '')
 
-    cursor.execute('''INSERT INTO master_applications
-                    (user_id, username, name, service, phone, districts, 
-                     price_min, price_max, experience, bio, portfolio, documents,
-                     entity_type, verification_type, source, documents_list, payment_methods, preferred_contact, age_group, status, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                    (user_id,
-                     message.from_user.username or "no_username",
-                     name, services_str, phone, districts,
-                     price_min, price_max, experience, bio, portfolio, documents,
-                     entity_type, verification_type, 'bot',
-                     documents_list, payment_methods, preferred_contact, age_group,
-                     'На проверке',
-                     datetime.now().strftime("%d.%m.%Y %H:%M")))
-    conn.commit()
-    print(f"DEBUG: Анкета сохранена, ID={application_id}, user_id={user_id}, статус='На проверке'") 
-    application_id = cursor.lastrowid
+    now = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
 
-    markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("📩 Связаться с мастером", url=f"tg://user?id={user_id}"))
-    admin_msg = f"""
+    if verification_type == 'simple':
+        # Упрощённая регистрация – сразу в masters
+        cursor.execute('''INSERT INTO masters
+                        (user_id, name, service, phone, districts, price_min, price_max,
+                         experience, bio, portfolio, documents, entity_type, verification_type,
+                         documents_list, payment_methods, preferred_contact, age_group,
+                         source, status, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                        (user_id, name, service, phone, districts, price_min, price_max,
+                         experience, bio, portfolio, documents, entity_type, verification_type,
+                         documents_list, payment_methods, preferred_contact, age_group,
+                         'bot', 'активен', now))
+        conn.commit()
+        master_id = cursor.lastrowid
+        print(f"DEBUG: Упрощённая регистрация, мастер ID={master_id}, user_id={user_id}")
+
+        bot.send_message(
+            message.chat.id,
+            "✅ **Упрощённая регистрация завершена!**\n\n"
+            "Вы добавлены в базу мастеров. Теперь клиенты смогут находить вас в каталоге.\n"
+            "⚠️ Вы **не будете получать уведомления** о новых заявках, так как выбрали упрощённый режим.\n"
+            "Чтобы начать получать заказы, пройдите полную регистрацию с проверкой документов."
+        )
+        if MASTER_CHAT_INVITE_LINK:
+            bot.send_message(message.chat.id, f"Приглашаем в закрытый чат мастеров: {MASTER_CHAT_INVITE_LINK}")
+        return master_id
+    else:
+        # Полная регистрация – в master_applications на модерацию
+        cursor.execute('''INSERT INTO master_applications
+                        (user_id, username, name, service, phone, districts, 
+                         price_min, price_max, experience, bio, portfolio, documents,
+                         entity_type, verification_type, source, documents_list, payment_methods, preferred_contact, age_group, status, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                        (user_id,
+                         message.from_user.username or "no_username",
+                         name, services_str, phone, districts,
+                         price_min, price_max, experience, bio, portfolio, documents,
+                         entity_type, verification_type, 'bot',
+                         documents_list, payment_methods, preferred_contact, age_group,
+                         'На проверке', now))
+        conn.commit()
+        application_id = cursor.lastrowid
+        print(f"DEBUG: Полная регистрация, заявка ID={application_id}, user_id={user_id}")
+
+        # Уведомление админу с кнопкой связи
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("📩 Связаться с мастером", url=f"tg://user?id={user_id}"))
+        admin_msg = f"""
 🆕 **НОВАЯ АНКЕТА МАСТЕРА!** (ID: {application_id})
 📱 **Источник:** Бот
 👤 **Telegram:** @{message.from_user.username or "нет"} (ID {user_id})
@@ -1389,14 +1419,19 @@ def save_master_application(message, user_id, user_data):
 
 ✅ Одобрить: /approve {application_id}
 ❌ Отклонить: /reject {application_id} [причина]
-    """
-    try:
-        if ADMIN_ID != 0:
-            bot.send_message(ADMIN_ID, admin_msg, reply_markup=markup)
-    except Exception as e:
-        print(f"Ошибка отправки админу: {e}")
+        """
+        try:
+            if ADMIN_ID != 0:
+                bot.send_message(ADMIN_ID, admin_msg, reply_markup=markup)
+        except Exception as e:
+            print(f"Ошибка отправки админу: {e}")
 
-    return application_id
+        bot.send_message(
+            message.chat.id,
+            "✅ **Ваша анкета отправлена на модерацию!**\n\n"
+            "Администратор проверит данные (обычно 1-2 дня). После одобрения вы попадёте в базу мастеров и будете получать уведомления о заявках."
+        )
+        return application_id
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('save_app_'))
 def save_app_callback(call):
@@ -1410,29 +1445,32 @@ def save_app_callback(call):
         return
     try:
         app_id = save_master_application(call.message, user_id, user_data)
-        print(f"DEBUG: save_app_callback, app_id={app_id}")
-        # ... остальной код
         bot.answer_callback_query(call.id, "✅ Анкета отправлена!")
-        bot.send_message(call.message.chat.id, "✅ Ваша анкета успешно отправлена на модерацию!")
+        bot.send_message(call.message.chat.id, "✅ Ваша анкета успешно отправлена!")
 
-        if user_data.get('documents_verified') == 'pending':
-            markup = types.InlineKeyboardMarkup()
-            markup.add(types.InlineKeyboardButton("📎 Отправить документы", callback_data=f"send_docs_{app_id}"))
-            bot.send_message(
-                call.message.chat.id,
-                "Вы выбрали вариант с проверкой документов. Теперь вы можете отправить фото/скан документов администратору.",
-                reply_markup=markup
-            )
-        elif user_data.get('send_portfolio_later'):
-            markup = types.InlineKeyboardMarkup()
-            markup.add(types.InlineKeyboardButton("📸 Отправить фото для портфолио", callback_data=f"send_photo_{app_id}"))
-            bot.send_message(
-                call.message.chat.id,
-                "Вы хотели отправить фото для портфолио. Сделайте это сейчас.",
-                reply_markup=markup
-            )
-        else:
+        if user_data.get('verification_type') == 'simple':
+            # Упрощённая регистрация – сразу в меню
             show_role_menu(call.message, 'master')
+        else:
+            # Полная регистрация – предложения документов и фото
+            if user_data.get('documents_verified') == 'pending':
+                markup = types.InlineKeyboardMarkup()
+                markup.add(types.InlineKeyboardButton("📎 Отправить документы", callback_data=f"send_docs_{app_id}"))
+                bot.send_message(
+                    call.message.chat.id,
+                    "Вы выбрали вариант с проверкой документов. Теперь вы можете отправить фото/скан документов администратору.",
+                    reply_markup=markup
+                )
+            elif user_data.get('send_portfolio_later'):
+                markup = types.InlineKeyboardMarkup()
+                markup.add(types.InlineKeyboardButton("📸 Отправить фото для портфолио", callback_data=f"send_photo_{app_id}"))
+                bot.send_message(
+                    call.message.chat.id,
+                    "Вы хотели отправить фото для портфолио. Сделайте это сейчас.",
+                    reply_markup=markup
+                )
+            else:
+                show_role_menu(call.message, 'master')
 
         if user_id in bot.master_data:
             del bot.master_data[user_id]
@@ -1531,12 +1569,12 @@ def notify_masters_about_new_request(request_id, request_data):
     service = request_data['service'].lower()
     district = request_data['district'].lower()
 
-    cursor.execute('''SELECT user_id, name, service, districts FROM masters WHERE status = 'активен' ''')
+    cursor.execute('''SELECT user_id, name, service, districts, verification_type FROM masters WHERE status = 'активен' ''')
     masters = cursor.fetchall()
     notified = 0
     for master in masters:
-        master_user_id, master_name, master_service, master_districts = master
-        if master_user_id == 0:
+        master_user_id, master_name, master_service, master_districts, master_verif = master
+        if master_user_id == 0 or master_verif == 'simple':
             continue
         service_match = any(prof.strip().lower() in master_service.lower() for prof in service.split())
         district_match = any(d.strip().lower() in district for d in master_districts.split(','))
@@ -1670,12 +1708,12 @@ def notify_masters_about_private_request(request_id, request_data):
     service = request_data['service'].lower()
     district = request_data['district'].lower()
 
-    cursor.execute('''SELECT user_id, name, service, districts FROM masters WHERE status = 'активен' ''')
+    cursor.execute('''SELECT user_id, name, service, districts, verification_type FROM masters WHERE status = 'активен' ''')
     masters = cursor.fetchall()
     notified = 0
     for master in masters:
-        master_user_id, master_name, master_service, master_districts = master
-        if master_user_id == 0:
+        master_user_id, master_name, master_service, master_districts, master_verif = master
+        if master_user_id == 0 or master_verif == 'simple':
             continue
         service_match = any(prof.strip().lower() in master_service.lower() for prof in service.split())
         district_match = any(d.strip().lower() in district for d in master_districts.split(','))
