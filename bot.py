@@ -1026,10 +1026,12 @@ def documents_callback(call):
     bot.answer_callback_query(call.id)
 
 def ask_doc_types_multiple(chat_id, user_id):
+    print(f"DEBUG ask_doc_types_multiple: user={user_id}")
     markup = types.InlineKeyboardMarkup(row_width=1)
     if 'selected_docs' not in bot.master_data[user_id]:
         bot.master_data[user_id]['selected_docs'] = []
     selected = bot.master_data[user_id]['selected_docs']
+    print(f"DEBUG: current selected={selected}")
     for code, name in DOC_TYPES:
         prefix = "✅ " if name in selected else ""
         markup.add(types.InlineKeyboardButton(
@@ -1047,18 +1049,21 @@ def ask_doc_types_multiple(chat_id, user_id):
 @bot.callback_query_handler(func=lambda call: call.data.startswith('doc_type_'))
 def doc_type_callback(call):
     user_id = call.from_user.id
+    print(f"DEBUG doc_type_callback: user={user_id}, data={call.data}")
     if user_id not in bot.master_data:
         bot.answer_callback_query(call.id, "❌ Начните анкету заново")
         return
     data = call.data[9:]  # убираем 'doc_type_'
     if data == "done":
         selected = bot.master_data[user_id].get('selected_docs', [])
+        print(f"DEBUG: done, selected={selected}")
         bot.master_data[user_id]['documents_list'] = ", ".join(selected)
         bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
         ask_documents_verification(call.message, user_id)
         bot.answer_callback_query(call.id, "✅ Список документов сохранён")
     else:
         doc_name = DOC_TYPES_DICT.get(data)
+        print(f"DEBUG: toggling {doc_name}")
         if not doc_name:
             bot.answer_callback_query(call.id, "❌ Ошибка")
             return
@@ -1068,7 +1073,8 @@ def doc_type_callback(call):
         else:
             selected.append(doc_name)
         bot.master_data[user_id]['selected_docs'] = selected
-        # ВАЖНО: здесь должна быть перерисовка клавиатуры, а не переход дальше
+        print(f"DEBUG: now selected={selected}")
+        # Здесь обязательно должна быть перерисовка клавиатуры
         ask_doc_types_multiple(call.message.chat.id, user_id)
         bot.answer_callback_query(call.id)
 
