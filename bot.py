@@ -439,13 +439,12 @@ def show_role_menu(message, role):
     elif role == 'master':
         status_type, status_text = get_master_status(user_id)
         if status_type == 'active':
-            markup.row('👤 Моя анкета', '📋 Активные заявки')
-            markup.row('🔔 Заявки по моему профилю', '✉️ Написать админу')
+            markup.row('👤 Моя анкета', '🔔 Заявки по моему профилю')
+            markup.row('✉️ Написать админу')
             if user_id == ADMIN_ID:
                 markup.row('👑 Админ-панель')
             markup.row('🔄 Сменить роль')
-            text = "👋 **Режим: Мастер**\n\n✅ Вы активны и получаете уведомления о новых заявках.\n• «Моя анкета» – просмотр и редактирование.\n• «Активные заявки» – все публичные заявки.\n• «Заявки по моему профилю» – только подходящие вам."
-        elif status_type == 'pending':
+            text = "👋 **Режим: Мастер**\n\n✅ Вы активны. Все публичные заявки публикуются в канале. Здесь вы можете:\n• Посмотреть и редактировать свою анкету.\n• Получить список заявок, подходящих под ваш профиль и районы."
             markup.row('👤 Моя анкета', '❌ Отозвать анкету')
             markup.row('📢 Канал с мастерами', '✉️ Написать админу')
             if user_id == ADMIN_ID:
@@ -487,14 +486,13 @@ def start(message):
             message,
             "👋 Добро пожаловать в бот заявок на ремонт!\n\n"
             "📌 В этом чате я только публикую заявки и отзывы.\n\n"
-            "👇 Вся работа со мной — в личных сообщениях:\n"
+            "👇 Для работы со мной перейдите в личные сообщения:\n"
             f"👉 @{BOT_USERNAME}\n\n"
-            "Там вы можете:\n"
+            "Там вы сможете:\n"
             "✅ Оставить заявку\n"
             "✅ Найти мастера в каталоге\n"
             "✅ Стать мастером и добавить анкету\n"
-            "✅ Оставить отзыв или рекомендацию\n"
-            "✅ Проверить статус анкеты",
+            "✅ Управлять своими заявками и анкетами",
             reply_markup=markup
         )
         return
@@ -2295,6 +2293,65 @@ def reject_response_callback(call):
         call.message.message_id
     )
     bot.answer_callback_query(call.id)
+@bot.message_handler(func=lambda message: message.text == '👤 Моя анкета')
+def my_profile(message):
+    if not only_private(message):
+        return
+    user_id = message.from_user.id
+    # Сначала ищем в активных мастерах
+    cursor.execute('''SELECT id, name, service, phone, districts, price_min, experience, bio, portfolio,
+                      preferred_contact, payment_methods, age_group, status
+                      FROM masters WHERE user_id = ?''', (user_id,))
+    master = cursor.fetchone()
+    if master:
+        master_id, name, service, phone, districts, price_min, experience, bio, portfolio, pref_contact, payment, age, status = master
+        text = f"""
+👤 **Ваша анкета (активный мастер)**
+
+👤 Имя: {name}
+🔧 Профили: {service}
+📞 Телефон: {phone}
+📍 Районы: {districts}
+💰 Мин. цена: {price_min}
+⏱ Опыт: {experience}
+💬 О себе: {bio}
+📸 Портфолио: {portfolio}
+📞 Контакт: {pref_contact}
+💳 Оплата: {payment}
+🎂 Возраст: {age}
+📌 Статус: {status}
+        """
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton("✏️ Редактировать", callback_data=f"edit_master_{master_id}"))
+        bot.send_message(message.chat.id, text, reply_markup=markup)
+    else:
+        # Ищем в заявках на проверку
+        cursor.execute('''SELECT id, name, service, phone, districts, price_min, experience, bio, portfolio,
+                          preferred_contact, payment_methods, age_group, status
+                          FROM master_applications WHERE user_id = ?''', (user_id,))
+        app = cursor.fetchone()
+        if app:
+            app_id, name, service, phone, districts, price_min, experience, bio, portfolio, pref_contact, payment, age, status = app
+            text = f"""
+👤 **Ваша анкета (на проверке)**
+
+👤 Имя: {name}
+🔧 Профили: {service}
+📞 Телефон: {phone}
+📍 Районы: {districts}
+💰 Мин. цена: {price_min}
+⏱ Опыт: {experience}
+💬 О себе: {bio}
+📸 Портфолио: {portfolio}
+📞 Контакт: {pref_contact}
+💳 Оплата: {payment}
+🎂 Возраст: {age}
+📌 Статус: {status}
+            """
+            bot.send_message(message.chat.id, text)
+        else:
+            bot.send_message(message.chat.id, "У вас ещё нет анкеты. Нажмите «👷 Заполнить анкету».")
+
 
 # ================ ПОИСК МАСТЕРА (КАТАЛОГ) ================
 @bot.message_handler(func=lambda message: message.text == '🔍 Найти мастера')
