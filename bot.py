@@ -2162,8 +2162,6 @@ def process_response(message, req_id, master_id):
             )
         except Exception as e:
             print(f"Не удалось уведомить клиента {client_id}: {e}")
-    except:
-        pass
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('channel_respond_'))
 def channel_respond_callback(call):
