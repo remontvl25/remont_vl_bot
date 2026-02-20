@@ -1017,7 +1017,7 @@ def documents_callback(call):
         bot.master_data[user_id]['documents_list'] = ""
         bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
         ask_documents_verification(call.message, user_id)
-    else:
+    else:  # skip
         bot.master_data[user_id]['documents'] = "Пропустить"
         bot.master_data[user_id]['documents_list'] = ""
         bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
@@ -1067,7 +1067,7 @@ def doc_type_callback(call):
         else:
             selected.append(doc_name)
         bot.master_data[user_id]['selected_docs'] = selected
-        ask_doc_types_multiple(call.message.chat.id, user_id)
+        ask_doc_types_multiple(call.message.chat.id, user_id)   # ← перерисовка клавиатуры
         bot.answer_callback_query(call.id)
 
 def ask_documents_verification(message, user_id):
@@ -1181,7 +1181,7 @@ def show_summary(message, user_id):
 💳 **Оплата:** {data.get('payment_methods', 'Не указано')}
 💬 **О себе:** {data.get('bio', 'Не указано')}
 📸 **Портфолио:** {data.get('portfolio', 'Не указано')}
-📄 **Документы:** {data['documents']}
+📄 **Документы:** {data.get('documents', 'Не указано')}
    **Список:** {data.get('documents_list', '')}
 🛡️ **Готовность к проверке:** {'✅ Да' if data.get('documents_verified')=='pending' else '❌ Нет'}
 📞 **Предпочтительный контакт:** {data.get('preferred_contact', 'telegram')}
