@@ -2221,8 +2221,6 @@ def process_response_from_channel(message, request_id, master_id):
             )
         except Exception as e:
             print(f"Не удалось уведомить клиента {client_id}: {e}")
-    except:
-        pass
 
 # ================ ПОИСК МАСТЕРА (КАТАЛОГ) ================
 @bot.message_handler(func=lambda message: message.text == '🔍 Найти мастера')
