@@ -384,14 +384,18 @@ def publish_delayed_requests():
             print(f"Ошибка публикации отложенной заявки {req_id}: {e}")
 
 def get_master_status(user_id):
+    print(f"DEBUG: get_master_status для user {user_id}")
     cursor.execute("SELECT status FROM masters WHERE user_id = ?", (user_id,))
     row = cursor.fetchone()
     if row:
+        print(f"DEBUG: найден в masters со статусом {row[0]}")
         return ('active', row[0])
     cursor.execute("SELECT status FROM master_applications WHERE user_id = ?", (user_id,))
     row = cursor.fetchone()
     if row:
+        print(f"DEBUG: найден в master_applications со статусом {row[0]}")
         return ('pending', row[0])
+    print(f"DEBUG: статус не найден")
     return (None, None)
 
 def check_bot_admin_in_chat(chat_id):
@@ -1026,12 +1030,10 @@ def documents_callback(call):
     bot.answer_callback_query(call.id)
 
 def ask_doc_types_multiple(chat_id, user_id):
-    # Инициализируем список выбранных документов, если ещё нет
     if 'selected_docs' not in bot.master_data[user_id]:
         bot.master_data[user_id]['selected_docs'] = []
     selected = bot.master_data[user_id]['selected_docs']
     
-    # Формируем клавиатуру
     markup = types.InlineKeyboardMarkup(row_width=1)
     for code, name in DOC_TYPES:
         prefix = "✅ " if name in selected else ""
@@ -1053,7 +1055,7 @@ def ask_doc_types_multiple(chat_id, user_id):
         except Exception as e:
             print(f"Ошибка редактирования сообщения: {e}. Отправляем новое.")
     
-    # Если нет сохранённого или редактирование не удалось, отправляем новое сообщение
+    # Отправляем новое сообщение и сохраняем его ID
     sent = bot.send_message(
         chat_id,
         "📄 **Шаг 12 из 16**\n\n"
@@ -1073,10 +1075,14 @@ def doc_type_callback(call):
     if data == "done":
         selected = bot.master_data[user_id].get('selected_docs', [])
         bot.master_data[user_id]['documents_list'] = ", ".join(selected)
-        # Удаляем сохранённый message_id, чтобы следующая клавиатура создалась заново
+        # Удаляем сохранённый ID, чтобы при возврате не редактировать старое сообщение
         if 'doc_message_id' in bot.master_data[user_id]:
             del bot.master_data[user_id]['doc_message_id']
-        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+        # Убираем клавиатуру у текущего сообщения (оно могло быть отредактировано)
+        try:
+            bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+        except:
+            pass
         ask_documents_verification(call.message, user_id)
         bot.answer_callback_query(call.id, "✅ Список документов сохранён")
     else:
@@ -1355,6 +1361,7 @@ def save_master_application(message, user_id, user_data):
                      'На проверке',
                      datetime.now().strftime("%d.%m.%Y %H:%M")))
     conn.commit()
+    print(f"DEBUG: Анкета сохранена, ID={application_id}, user_id={user_id}, статус='На проверке'") 
     application_id = cursor.lastrowid
 
     markup = types.InlineKeyboardMarkup()
@@ -1403,6 +1410,8 @@ def save_app_callback(call):
         return
     try:
         app_id = save_master_application(call.message, user_id, user_data)
+        print(f"DEBUG: save_app_callback, app_id={app_id}")
+        # ... остальной код
         bot.answer_callback_query(call.id, "✅ Анкета отправлена!")
         bot.send_message(call.message.chat.id, "✅ Ваша анкета успешно отправлена на модерацию!")
 
