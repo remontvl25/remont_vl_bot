@@ -226,7 +226,6 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS review_complaints
                  complaint_text TEXT,
                  status TEXT DEFAULT 'new',
                  created_at TEXT)''')
-add_column_if_not_exists('responses', 'updated_at', "TEXT DEFAULT ''")
 
 conn.commit()
 
@@ -255,6 +254,8 @@ add_column_if_not_exists('masters', 'age_group', "TEXT DEFAULT ''")
 add_column_if_not_exists('masters', 'documents_verified', "INTEGER DEFAULT 0")
 add_column_if_not_exists('masters', 'photos_verified', "INTEGER DEFAULT 0")
 add_column_if_not_exists('masters', 'reviews_verified', "INTEGER DEFAULT 0")
+
+add_column_if_not_exists('responses', 'updated_at', "TEXT DEFAULT ''")
 
 conn.commit()
 
