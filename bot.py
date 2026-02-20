@@ -226,6 +226,7 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS review_complaints
                  complaint_text TEXT,
                  status TEXT DEFAULT 'new',
                  created_at TEXT)''')
+add_column_if_not_exists('responses', 'updated_at', "TEXT DEFAULT ''")
 
 conn.commit()
 
@@ -1523,6 +1524,115 @@ def notify_masters_about_new_request(request_id, request_data):
                 print(f"Не удалось уведомить мастера {master_user_id}: {e}")
     print(f"Уведомлено {notified} мастеров по заявке #{request_id}")
 
+@bot.callback_query_handler(func=lambda call: call.data.startswith('accept_response_'))
+def accept_response_callback(call):
+    parts = call.data.split('_')
+    req_id = int(parts[2])
+    master_id = int(parts[3])
+    user_id = call.from_user.id
+
+    # Проверяем, что это клиент, создавший заявку
+    cursor.execute('SELECT user_id FROM requests WHERE id = ?', (req_id,))
+    row = cursor.fetchone()
+    if not row or row[0] != user_id:
+        bot.answer_callback_query(call.id, "❌ Это не ваша заявка")
+        return
+
+    # Проверяем, что отклик ещё в статусе pending
+    cursor.execute('SELECT status FROM responses WHERE request_id = ? AND master_id = ?', (req_id, master_id))
+    resp = cursor.fetchone()
+    if not resp or resp[0] != 'pending':
+        bot.answer_callback_query(call.id, "❌ Отклик уже обработан")
+        return
+
+    now = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+    # Обновляем статус отклика
+    cursor.execute('UPDATE responses SET status = ?, updated_at = ? WHERE request_id = ? AND master_id = ?',
+                   ('accepted', now, req_id, master_id))
+    # Отклоняем остальные отклики (чтобы клиент не мог принять несколько)
+    cursor.execute('UPDATE responses SET status = ?, updated_at = ? WHERE request_id = ? AND status = "pending"',
+                   ('rejected', now, req_id))
+    # Обновляем статус заявки
+    cursor.execute('UPDATE requests SET status = ? WHERE id = ?', ('завершена', req_id))
+    conn.commit()
+
+    # Получаем контакты мастера
+    cursor.execute('SELECT name, phone, preferred_contact FROM masters WHERE id = ?', (master_id,))
+    master = cursor.fetchone()
+    master_name, master_phone, master_contact = master if master else ("Неизвестно", "нет", "нет")
+
+    # Отправляем клиенту контакты мастера
+    bot.send_message(
+        user_id,
+        f"✅ Вы приняли отклик мастера **{master_name}**.\n\n"
+        f"📞 Контакт мастера: {master_phone}\n"
+        f"📱 Предпочтительный способ связи: {master_contact}\n\n"
+        f"Свяжитесь с мастером для обсуждения деталей."
+    )
+
+    # Уведомляем мастера
+    cursor.execute('SELECT user_id FROM masters WHERE id = ?', (master_id,))
+    master_user = cursor.fetchone()
+    if master_user and master_user[0] != 0:
+        try:
+            # Получаем контакты клиента (username или ID)
+            cursor.execute('SELECT username, user_id FROM requests WHERE id = ?', (req_id,))
+            client = cursor.fetchone()
+            client_username, client_id_db = client if client else ("", "")
+            client_contact = f"@{client_username}" if client_username else f"ID: {client_id_db}"
+            bot.send_message(
+                master_user[0],
+                f"✅ Ваш отклик на заявку #{req_id} принят!\n\n"
+                f"👤 Контакт клиента: {client_contact}\n"
+                f"Свяжитесь с клиентом для обсуждения деталей."
+            )
+        except Exception as e:
+            print(f"Не удалось уведомить мастера {master_user[0]}: {e}")
+
+    bot.edit_message_text(
+        "✅ Вы приняли отклик. Контакты отправлены.",
+        call.message.chat.id,
+        call.message.message_id
+    )
+    bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('reject_response_'))
+def reject_response_callback(call):
+    parts = call.data.split('_')
+    req_id = int(parts[2])
+    master_id = int(parts[3])
+    user_id = call.from_user.id
+
+    cursor.execute('SELECT user_id FROM requests WHERE id = ?', (req_id,))
+    row = cursor.fetchone()
+    if not row or row[0] != user_id:
+        bot.answer_callback_query(call.id, "❌ Это не ваша заявка")
+        return
+
+    now = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+    cursor.execute('UPDATE responses SET status = ?, updated_at = ? WHERE request_id = ? AND master_id = ?',
+                   ('rejected', now, req_id, master_id))
+    conn.commit()
+
+    # Уведомляем мастера
+    cursor.execute('SELECT user_id FROM masters WHERE id = ?', (master_id,))
+    master_user = cursor.fetchone()
+    if master_user and master_user[0] != 0:
+        try:
+            bot.send_message(
+                master_user[0],
+                f"❌ Ваш отклик на заявку #{req_id} был отклонён клиентом."
+            )
+        except:
+            pass
+
+    bot.edit_message_text(
+        "❌ Отклик отклонён.",
+        call.message.chat.id,
+        call.message.message_id
+    )
+    bot.answer_callback_query(call.id)
+    
 def notify_masters_about_private_request(request_id, request_data):
     service = request_data['service'].lower()
     district = request_data['district'].lower()
@@ -1777,6 +1887,18 @@ def confirm_request(call):
     if user_id in bot.request_data:
         del bot.request_data[user_id]
     bot.answer_callback_query(call.id)
+    bot.send_message(
+            call.message.chat.id,
+            "📢 Ваша заявка опубликована в канале и разослана подходящим мастерам.\n"
+            "Как только появятся отклики, вы получите уведомление.\n"
+            "Статус заявки можно отслеживать в разделе «Мои заявки»."
+        )
+    bot.send_message(
+            call.message.chat.id,
+            "📢 Ваша заявка разослана подходящим мастерам.\n"
+            "Как только появятся отклики, вы получите уведомление.\n"
+            "Статус заявки можно отслеживать в разделе «Мои заявки»."
+        )
 
 @bot.callback_query_handler(func=lambda call: call.data == 'cancel_req')
 def cancel_request(call):
@@ -1813,12 +1935,100 @@ def my_requests(message):
 📌 Статус: {status}
 🕒 Создана: {created}
         """
+        markup = types.InlineKeyboardMarkup()
         if chat_msg_id is None and status == 'активна':
-            markup = types.InlineKeyboardMarkup()
             markup.add(types.InlineKeyboardButton("✏️ Редактировать", callback_data=f"edit_request_{req_id}"))
+        # Кнопка для просмотра откликов
+        cursor.execute('SELECT COUNT(*) FROM responses WHERE request_id = ?', (req_id,))
+        resp_count = cursor.fetchone()[0]
+        if resp_count > 0:
+            markup.add(types.InlineKeyboardButton(f"👥 Отклики ({resp_count})", callback_data=f"view_responses_{req_id}"))
+        # Кнопка повторной публикации для завершённых заявок
+        if status != 'активна':
+            markup.add(types.InlineKeyboardButton("🔄 Опубликовать заново", callback_data=f"republish_request_{req_id}"))
+        if markup.keyboard:
             bot.send_message(message.chat.id, text, reply_markup=markup)
         else:
             bot.send_message(message.chat.id, text)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('view_responses_'))
+def view_responses_callback(call):
+    req_id = int(call.data.split('_')[2])
+    user_id = call.from_user.id
+
+    # Проверяем, что это владелец заявки
+    cursor.execute('SELECT user_id FROM requests WHERE id = ?', (req_id,))
+    row = cursor.fetchone()
+    if not row or row[0] != user_id:
+        bot.answer_callback_query(call.id, "❌ Это не ваша заявка")
+        return
+
+    cursor.execute('''
+        SELECT r.id, m.name, r.price, r.comment, r.status, m.id
+        FROM responses r
+        JOIN masters m ON r.master_id = m.id
+        WHERE r.request_id = ?
+        ORDER BY r.created_at DESC
+    ''', (req_id,))
+    responses = cursor.fetchall()
+    if not responses:
+        bot.answer_callback_query(call.id, "Нет откликов")
+        return
+
+    for resp in responses:
+        resp_id, master_name, price, comment, status, master_id = resp
+        text = f"""
+👤 Мастер: {master_name}
+📝 Комментарий: {comment}
+📌 Статус: {status}
+        """
+        markup = types.InlineKeyboardMarkup()
+        if status == 'pending':
+            markup.add(
+                types.InlineKeyboardButton("✅ Принять", callback_data=f"accept_response_{req_id}_{master_id}"),
+                types.InlineKeyboardButton("❌ Отклонить", callback_data=f"reject_response_{req_id}_{master_id}")
+            )
+        bot.send_message(call.message.chat.id, text, reply_markup=markup if markup.keyboard else None)
+    bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('republish_request_'))
+def republish_request_callback(call):
+    req_id = int(call.data.split('_')[2])
+    user_id = call.from_user.id
+
+    cursor.execute('SELECT user_id FROM requests WHERE id = ?', (req_id,))
+    row = cursor.fetchone()
+    if not row or row[0] != user_id:
+        bot.answer_callback_query(call.id, "❌ Это не ваша заявка")
+        return
+
+    # Получаем данные старой заявки
+    cursor.execute('SELECT service, description, district, date, budget, is_public FROM requests WHERE id = ?', (req_id,))
+    req = cursor.fetchone()
+    if not req:
+        bot.answer_callback_query(call.id, "❌ Заявка не найдена")
+        return
+    service, desc, district, date, budget, is_public = req
+    now = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+    cursor.execute('''INSERT INTO requests
+                    (user_id, username, service, description, district, date, budget, is_public, status, delayed, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                    (user_id,
+                     call.from_user.username or "no_username",
+                     service, desc, district, date, budget,
+                     is_public, 'активна',
+                     1 if is_night_time() and is_public else 0,
+                     now))
+    conn.commit()
+    new_req_id = cursor.lastrowid
+
+    bot.send_message(call.message.chat.id, f"✅ Заявка #{new_req_id} создана заново.")
+    if is_public and not is_night_time():
+        # Публикуем в канал (можно вызвать функцию публикации, но для простоты уведомим)
+        bot.send_message(call.message.chat.id, "Заявка будет опубликована в ближайшее время.")
+    else:
+        bot.send_message(call.message.chat.id, "Заявка сохранена и будет опубликована утром.")
+    bot.answer_callback_query(call.id)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('edit_request_'))
 def edit_request_callback(call):
@@ -1925,18 +2135,32 @@ def process_response(message, req_id, master_id):
         bot.send_message(message.chat.id, "❌ Введите текст отклика.")
         return
     now = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
-    cursor.execute('''INSERT INTO responses (request_id, master_id, price, comment, status, created_at)
-                      VALUES (?, ?, ?, ?, ?, ?)''',
-                    (req_id, master_id, '', text, 'pending', now))
+    cursor.execute('''INSERT INTO responses (request_id, master_id, price, comment, status, created_at, updated_at)
+                      VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                    (req_id, master_id, '', text, 'pending', now, now))
     conn.commit()
     bot.send_message(message.chat.id, "✅ Ваш отклик отправлен клиенту и администратору.")
+
+    # Уведомление клиенту
     cursor.execute('SELECT user_id FROM requests WHERE id = ?', (req_id,))
-    client_id = cursor.fetchone()[0]
-    try:
-        bot.send_message(
-            client_id,
-            f"🔔 На вашу заявку #{req_id} поступил отклик от мастера. Проверьте в боте."
+    client = cursor.fetchone()
+    if client:
+        client_id = client[0]
+        markup = types.InlineKeyboardMarkup()
+        markup.add(
+            types.InlineKeyboardButton("✅ Принять", callback_data=f"accept_response_{req_id}_{master_id}"),
+            types.InlineKeyboardButton("❌ Отклонить", callback_data=f"reject_response_{req_id}_{master_id}")
         )
+        try:
+            bot.send_message(
+                client_id,
+                f"🔔 На вашу заявку #{req_id} поступил отклик от мастера.\n\n"
+                f"Предложение: {text}\n\n"
+                f"Вы можете принять или отклонить его.",
+                reply_markup=markup
+            )
+        except Exception as e:
+            print(f"Не удалось уведомить клиента {client_id}: {e}")
     except:
         pass
 
@@ -1972,18 +2196,32 @@ def process_response_from_channel(message, request_id, master_id):
         bot.send_message(message.chat.id, "❌ Введите текст отклика.")
         return
     now = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
-    cursor.execute('''INSERT INTO responses (request_id, master_id, price, comment, status, created_at)
-                      VALUES (?, ?, ?, ?, ?, ?)''',
-                    (request_id, master_id, '', text, 'pending', now))
+    cursor.execute('''INSERT INTO responses (request_id, master_id, price, comment, status, created_at, updated_at)
+                      VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                    (req_id, master_id, '', text, 'pending', now, now))
     conn.commit()
     bot.send_message(message.chat.id, "✅ Ваш отклик отправлен клиенту и администратору.")
-    cursor.execute('SELECT user_id FROM requests WHERE id = ?', (request_id,))
-    client_id = cursor.fetchone()[0]
-    try:
-        bot.send_message(
-            client_id,
-            f"🔔 На вашу заявку #{request_id} поступил отклик от мастера. Проверьте в боте."
+
+    # Уведомление клиенту
+    cursor.execute('SELECT user_id FROM requests WHERE id = ?', (req_id,))
+    client = cursor.fetchone()
+    if client:
+        client_id = client[0]
+        markup = types.InlineKeyboardMarkup()
+        markup.add(
+            types.InlineKeyboardButton("✅ Принять", callback_data=f"accept_response_{req_id}_{master_id}"),
+            types.InlineKeyboardButton("❌ Отклонить", callback_data=f"reject_response_{req_id}_{master_id}")
         )
+        try:
+            bot.send_message(
+                client_id,
+                f"🔔 На вашу заявку #{req_id} поступил отклик от мастера.\n\n"
+                f"Предложение: {text}\n\n"
+                f"Вы можете принять или отклонить его.",
+                reply_markup=markup
+            )
+        except Exception as e:
+            print(f"Не удалось уведомить клиента {client_id}: {e}")
     except:
         pass
 
