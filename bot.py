@@ -1189,7 +1189,7 @@ def process_master_phone_final(message, user_id):
         bot.register_next_step_handler(message, process_master_phone_final, user_id)
         return
     bot.master_data[user_id]['phone'] = phone
-    show_summary(message, user_id))
+    show_summary(message, user_id)
 
 def show_summary(message, user_id):
     data = bot.master_data[user_id]
