@@ -999,17 +999,15 @@ def show_documents_buttons(chat_id, user_id):
         # Для упрощённой регистрации пропускаем документы
         ask_contact_methods(chat_id, user_id)
         return
-    markup = types.InlineKeyboardMarkup(row_width=3)
+    markup = types.InlineKeyboardMarkup(row_width=2)
     markup.add(
-        types.InlineKeyboardButton("✅ Да, использую", callback_data="doc_yes"),
-        types.InlineKeyboardButton("❌ Нет, не использую", callback_data="doc_no"),
-        types.InlineKeyboardButton("⏩ Пропустить", callback_data="doc_skip")
+        types.InlineKeyboardButton("✅ Да, предоставляю", callback_data="doc_yes"),
+        types.InlineKeyboardButton("❌ Нет, не предоставляю", callback_data="doc_no")
     )
     bot.send_message(
         chat_id,
         "📄 **Шаг 11 из 16**\n\n"
-        "Используете ли вы в работе какие-либо документы (договор, акт, чек, счёт и т.п.)?\n\n"
-        "👉 **Выберите вариант:**",
+        "Предоставляете ли вы при работе какие-либо документы (договор, акт, чек и т.п.)?",
         reply_markup=markup
     )
 
@@ -1023,17 +1021,12 @@ def documents_callback(call):
     if choice == 'yes':
         bot.master_data[user_id]['documents'] = "Есть"
         bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
-        ask_doc_types_multiple(call.message.chat.id, user_id)   # ← переход к множественному выбору
-    elif choice == 'no':
+        ask_doc_types_multiple(call.message.chat.id, user_id)   # переход к выбору конкретных документов
+    else:  # 'no'
         bot.master_data[user_id]['documents'] = "Нет"
         bot.master_data[user_id]['documents_list'] = ""
         bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
-        ask_documents_verification(call.message, user_id)
-    else:  # skip
-        bot.master_data[user_id]['documents'] = "Пропустить"
-        bot.master_data[user_id]['documents_list'] = ""
-        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
-        ask_documents_verification(call.message, user_id)
+        ask_contact_methods(call.message.chat.id, user_id)      # сразу к контактам
     bot.answer_callback_query(call.id)
 
 def ask_doc_types_multiple(chat_id, user_id):
@@ -1050,7 +1043,6 @@ def ask_doc_types_multiple(chat_id, user_id):
         ))
     markup.add(types.InlineKeyboardButton("✅ Готово", callback_data="doc_type_done"))
     
-    # Если уже есть сохранённый message_id, редактируем то же сообщение
     if 'doc_message_id' in bot.master_data[user_id]:
         try:
             bot.edit_message_reply_markup(
@@ -1059,14 +1051,13 @@ def ask_doc_types_multiple(chat_id, user_id):
                 reply_markup=markup
             )
             return
-        except Exception as e:
-            print(f"Ошибка редактирования сообщения: {e}. Отправляем новое.")
+        except:
+            pass
     
-    # Отправляем новое сообщение и сохраняем его ID
     sent = bot.send_message(
         chat_id,
         "📄 **Шаг 12 из 16**\n\n"
-        "Какие документы вы можете предоставить при работе? (можно несколько):",
+        "Какие именно документы вы можете предоставить? (можно выбрать несколько):",
         reply_markup=markup
     )
     bot.master_data[user_id]['doc_message_id'] = sent.message_id
@@ -1082,15 +1073,13 @@ def doc_type_callback(call):
     if data == "done":
         selected = bot.master_data[user_id].get('selected_docs', [])
         bot.master_data[user_id]['documents_list'] = ", ".join(selected)
-        # Удаляем сохранённый ID, чтобы при возврате не редактировать старое сообщение
         if 'doc_message_id' in bot.master_data[user_id]:
             del bot.master_data[user_id]['doc_message_id']
-        # Убираем клавиатуру у текущего сообщения (оно могло быть отредактировано)
         try:
             bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
         except:
             pass
-        ask_documents_verification(call.message, user_id)
+        ask_documents_verification(call.message, user_id)   # переход к вопросу о проверке
         bot.answer_callback_query(call.id, "✅ Список документов сохранён")
     else:
         doc_name = DOC_TYPES_DICT.get(data)
@@ -1103,7 +1092,6 @@ def doc_type_callback(call):
         else:
             selected.append(doc_name)
         bot.master_data[user_id]['selected_docs'] = selected
-        # Обновляем клавиатуру в том же сообщении
         ask_doc_types_multiple(call.message.chat.id, user_id)
         bot.answer_callback_query(call.id)
 
@@ -1116,8 +1104,7 @@ def ask_documents_verification(message, user_id):
     bot.send_message(
         message.chat.id,
         "🛡️ **Шаг 13 из 16**\n\n"
-        "Готовы ли вы предоставить администратору документы для проверки (в том числе паспорт)?\n"
-        "Если да, после проверки ваша карточка получит статус «Документы проверены».",
+        "Готовы ли вы пройти проверку этих документов (предоставить фото/скан администратору)?",
         reply_markup=markup
     )
 
@@ -1132,8 +1119,7 @@ def verify_callback(call):
     else:
         bot.master_data[user_id]['documents_verified'] = 'no'
     bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
-    # Шаг 14 – способы связи
-    ask_contact_methods(call.message.chat.id, user_id)
+    ask_contact_methods(call.message.chat.id, user_id)   # переход к контактам
     bot.answer_callback_query(call.id)
 
 def ask_contact_methods(chat_id, user_id):
@@ -1925,6 +1911,13 @@ def my_requests(message):
         resp_count = cursor.fetchone()[0]
         if resp_count > 0:
             markup.add(types.InlineKeyboardButton(f"👥 Отклики ({resp_count})", callback_data=f"view_responses_{req_id}"))
+        if status == 'завершена':
+            # Проверяем, есть ли принятый мастер
+            cursor.execute('SELECT master_id FROM responses WHERE request_id = ? AND status = "accepted"', (req_id,))
+            acc = cursor.fetchone()
+            if acc:
+                master_id = acc[0]
+                markup.add(types.InlineKeyboardButton("⭐ Оставить отзыв", callback_data=f"leave_review_{req_id}_{master_id}"))
         if status != 'активна':
             markup.add(types.InlineKeyboardButton("🔄 Опубликовать заново", callback_data=f"republish_request_{req_id}"))
         if markup.keyboard:
@@ -1946,30 +1939,28 @@ def leave_review_callback(call):
     req_id = int(parts[2])
     master_id = int(parts[3])
     user_id = call.from_user.id
-    # Проверим, что это клиент и заявка его
+    # Проверяем, что заявка принадлежит этому клиенту
     cursor.execute('SELECT user_id FROM requests WHERE id = ?', (req_id,))
     row = cursor.fetchone()
     if not row or row[0] != user_id:
         bot.answer_callback_query(call.id, "❌ Это не ваша заявка")
         return
-    # Запускаем процесс оставления отзыва (можно использовать существующую логику, но с предзаполненным мастером)
-    # Для простоты отправим сообщение с предложением ввести текст отзыва, а потом оценить
+    # Получаем имя мастера
+    cursor.execute('SELECT name FROM masters WHERE id = ?', (master_id,))
+    row = cursor.fetchone()
+    master_name = row[0] if row else "Мастер"
     bot.send_message(
         call.message.chat.id,
-        f"⭐ Напишите отзыв о мастере (ID {master_id}):"
+        f"⭐ Напишите отзыв о мастере **{master_name}**:"
     )
-    bot.register_next_step_handler(call.message, process_review_text_from_request, req_id, master_id)
+    bot.register_next_step_handler(call.message, process_review_text_from_request, req_id, master_id, master_name)
     bot.answer_callback_query(call.id)
 
-def process_review_text_from_request(message, req_id, master_id):
+def process_review_text_from_request(message, req_id, master_id, master_name):
     text = safe_text(message)
     if not text:
         bot.send_message(message.chat.id, "❌ Текст не может быть пустым.")
         return
-    # Получаем имя мастера
-    cursor.execute('SELECT name FROM masters WHERE id = ?', (master_id,))
-    row = cursor.fetchone()
-    master_name = row[0] if row else "Неизвестно"
     markup = types.InlineKeyboardMarkup(row_width=5)
     buttons = [types.InlineKeyboardButton(str(i), callback_data=f"review_rate_{i}_{master_id}") for i in range(1, 6)]
     markup.add(*buttons)
