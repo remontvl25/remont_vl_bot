@@ -2178,40 +2178,27 @@ def respond_to_request(call):
     bot.register_next_step_handler(call.message, process_response, req_id, master_id)
     bot.answer_callback_query(call.id)
 
-def process_response(message, req_id, master_id):
-    text = safe_text(message)
-    if not text:
-        bot.send_message(message.chat.id, "❌ Введите текст отклика.")
-        return
-    now = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
-    cursor.execute('''INSERT INTO responses (request_id, master_id, price, comment, status, created_at, updated_at)
-                      VALUES (?, ?, ?, ?, ?, ?, ?)''',
-                    (req_id, master_id, '', text, 'pending', now, now))
-    conn.commit()
-    bot.send_message(message.chat.id, "✅ Ваш отклик отправлен клиенту и администратору.")
-
     # Уведомление клиенту
-        # Уведомление клиенту
-        cursor.execute('SELECT user_id FROM requests WHERE id = ?', (req_id,))
-        client = cursor.fetchone()
-        if client:
-            client_id = client[0]
-            # Получаем данные мастера
-            cursor.execute('''SELECT name, service, districts, phone, preferred_contact, user_id 
-                              FROM masters WHERE id = ?''', (master_id,))
-            master_info = cursor.fetchone()
-            if master_info:
-                master_name, master_service, master_districts, master_phone, master_pref, master_user_id = master_info
-                # Формируем сообщение с краткой информацией о мастере
-                master_text = f"""
+    cursor.execute('SELECT user_id FROM requests WHERE id = ?', (req_id,))
+    client = cursor.fetchone()
+    if client:
+        client_id = client[0]
+        # Получаем данные мастера
+        cursor.execute('''SELECT name, service, districts, phone, preferred_contact, user_id 
+                          FROM masters WHERE id = ?''', (master_id,))
+        master_info = cursor.fetchone()
+        if master_info:
+            master_name, master_service, master_districts, master_phone, master_pref, master_user_id = master_info
+            # Формируем сообщение с краткой информацией о мастере
+            master_text = f"""
 👤 **Мастер:** {master_name}
 🔧 **Профили:** {master_service}
 📍 **Районы:** {master_districts}
 📞 **Контакт:** {master_phone if master_phone else 'не указан'}
 📱 **Предпочтительный способ связи:** {master_pref}
-                """
-            else:
-                master_text = "Информация о мастере временно недоступна."
+            """
+        else:
+            master_text = "Информация о мастере временно недоступна."
 
             # Клавиатура с действиями
             markup = types.InlineKeyboardMarkup(row_width=2)
