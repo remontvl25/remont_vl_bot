@@ -996,7 +996,6 @@ def process_master_portfolio_text(message, user_id):
 
 def show_documents_buttons(chat_id, user_id):
     if bot.master_data[user_id].get('verification_type') == 'simple':
-        # Для упрощённой регистрации пропускаем документы
         ask_contact_methods(chat_id, user_id)
         return
     markup = types.InlineKeyboardMarkup(row_width=2)
@@ -1021,12 +1020,12 @@ def documents_callback(call):
     if choice == 'yes':
         bot.master_data[user_id]['documents'] = "Есть"
         bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
-        ask_doc_types_multiple(call.message.chat.id, user_id)   # переход к выбору конкретных документов
-    else:  # 'no'
+        ask_doc_types_multiple(call.message.chat.id, user_id)
+    else:
         bot.master_data[user_id]['documents'] = "Нет"
         bot.master_data[user_id]['documents_list'] = ""
         bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
-        ask_contact_methods(call.message.chat.id, user_id)      # сразу к контактам
+        ask_contact_methods(call.message.chat.id, user_id)
     bot.answer_callback_query(call.id)
 
 def ask_doc_types_multiple(chat_id, user_id):
@@ -1051,8 +1050,8 @@ def ask_doc_types_multiple(chat_id, user_id):
                 reply_markup=markup
             )
             return
-        except:
-            pass
+        except Exception as e:
+            print(f"Ошибка редактирования: {e}")
     
     sent = bot.send_message(
         chat_id,
@@ -1068,7 +1067,7 @@ def doc_type_callback(call):
     if user_id not in bot.master_data:
         bot.answer_callback_query(call.id, "❌ Начните анкету заново")
         return
-    data = call.data[9:]  # убираем 'doc_type_'
+    data = call.data[9:]
     
     if data == "done":
         selected = bot.master_data[user_id].get('selected_docs', [])
@@ -1079,7 +1078,7 @@ def doc_type_callback(call):
             bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
         except:
             pass
-        ask_documents_verification(call.message, user_id)   # переход к вопросу о проверке
+        ask_documents_verification(call.message, user_id)
         bot.answer_callback_query(call.id, "✅ Список документов сохранён")
     else:
         doc_name = DOC_TYPES_DICT.get(data)
@@ -1119,7 +1118,7 @@ def verify_callback(call):
     else:
         bot.master_data[user_id]['documents_verified'] = 'no'
     bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
-    ask_contact_methods(call.message.chat.id, user_id)   # переход к контактам
+    ask_contact_methods(call.message.chat.id, user_id)
     bot.answer_callback_query(call.id)
 
 def ask_contact_methods(chat_id, user_id):
@@ -1190,13 +1189,16 @@ def process_master_phone_final(message, user_id):
         bot.register_next_step_handler(message, process_master_phone_final, user_id)
         return
     bot.master_data[user_id]['phone'] = phone
-    show_summary(message, user_id)
+    show_summary(message, user_id))
 
 def show_summary(message, user_id):
     data = bot.master_data[user_id]
     summary = f"""
     if 'portfolio' not in data:
-        data['portfolio'] = 'Не указано'    
+        data['portfolio'] = 'Не указано'   
+
+    print(f"DEBUG show_summary: user={user_id}, portfolio={data.get('portfolio')}, phone={data.get('phone')}")
+    print(f"DEBUG data keys: {list(data.keys())}")
 📋 **Сводка анкеты:**
 
 👤 **Имя/Название:** {data['name']}
@@ -1225,6 +1227,7 @@ def show_summary(message, user_id):
         types.InlineKeyboardButton("❌ Отмена", callback_data="cancel_app")
     )
     bot.send_message(message.chat.id, summary, reply_markup=markup)
+    print(f"DEBUG show_summary: portfolio={data.get('portfolio')}, phone={data.get('phone')}")   
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('edit_summary_'))
 def edit_summary_callback(call):
@@ -1341,6 +1344,8 @@ def save_master_application(message, user_id, user_data):
     experience = user_data['experience']
     bio = user_data.get('bio', 'Не указано')
     portfolio = user_data.get('portfolio', 'Не указано')
+    if portfolio is None or portfolio.strip() == '':
+        portfolio = 'Не указано'
     documents = user_data.get('documents', 'Не указано')
     entity_type = user_data.get('entity_type', 'individual')
     verification_type = user_data['verification_type']
@@ -1350,6 +1355,7 @@ def save_master_application(message, user_id, user_data):
     age_group = user_data.get('age_group', '')
 
     now = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+    print(f"DEBUG before insert: portfolio={portfolio}, phone={phone}")    
 
     if verification_type == 'simple':
         # Упрощённая регистрация – сразу в masters
@@ -2713,6 +2719,7 @@ def process_review_text(message, master_id, master_name):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('review_rate_'))
 def review_rate_callback(call):
+    print(f"DEBUG: review saved, master_id={master_id}, user={user_id}, status='pending'")    
     parts = call.data.split('_')
     rating = int(parts[2])
     master_id = int(parts[3])
